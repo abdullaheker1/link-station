@@ -476,10 +476,6 @@
   <div><span class="label">STAMPS:</span> <span id="stampCount" class="val">000</span></div>
 </div>
 
-<div class="hud hud-bl">
-  <span class="ver" aria-hidden="true">// LINK_STATION_v3.0 // EST.2026</span>
-  <button class="diag-toggle" id="diagBtn" type="button" aria-pressed="false" title="Diagnostics overlay (D)">[ DIAG: OFF ]</button>
-</div>
 
 <div class="diag-panel" id="diagPanel" hidden aria-hidden="true"><pre id="diagText"></pre></div>
 <div class="hud hud-br" aria-hidden="true">SHEKERFND // ASABEES</div>
@@ -505,6 +501,12 @@
 
     <div class="stripe"></div>
   </div>
+</div>
+
+<!-- After the panel in DOM order so Tab reaches the nodes first -->
+<div class="hud hud-bl">
+  <span class="ver" aria-hidden="true">// LINK_STATION_v3.0 // EST.2026</span>
+  <button class="diag-toggle" id="diagBtn" type="button" aria-pressed="false" title="Diagnostics overlay (D)">[ DIAG: OFF ]</button>
 </div>
 
 <script src="icons.js"></script>
