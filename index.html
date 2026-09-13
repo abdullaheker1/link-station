@@ -297,9 +297,14 @@
      visibly reserved rather than a dead href="#". */
   .link--offline {
     opacity: 0.55;
-    pointer-events: none;
     border-style: dashed;
   }
+  .link--offline:hover {
+    transform: none;
+    background: rgba(42, 40, 38, 0.55);
+    border-color: rgba(255, 58, 0, 0.6);
+  }
+  .link--offline:hover::before { transform: scaleY(0); }
   .link--offline .link-icon,
   .link--offline .link-name { color: var(--text-dim); }
   .link--offline .link-handle {
@@ -410,6 +415,7 @@
   <div><span class="label">SYS:</span> <span class="val">KR-4DOF</span></div>
   <div><span class="label">MODE:</span> STAMP-IK</div>
   <div><span class="label">EE:</span> <span id="eePos">000, 000</span></div>
+  <div><span class="label">TGT:</span> <span id="targetName">FREE</span></div>
 </div>
 
 <div class="hud hud-tr" aria-hidden="true">
@@ -657,6 +663,69 @@ computeLengths();
 const angles = [-Math.PI / 2, -Math.PI / 3, -Math.PI / 6, 0];
 
 /* ============================================================
+   NODE LOCK
+   ------------------------------------------------------------
+   Hovering (or keyboard-focusing) a node in the panel hands the
+   arm a target: the node's "port", just left of the row where the
+   orange hover bar is. The reticle stays with the pointer; the arm
+   docks on the port. Clicking while locked stamps ROUTED on the
+   port instead of a free mark. Offline rows can be hovered but the
+   arm refuses to dock on them (HUD shows OFFLINE, reticle turns red).
+   ============================================================ */
+const lock = { el: null, name: '', offline: false };
+const nodeListEl = document.getElementById('nodeList');
+const targetNameEl = document.getElementById('targetName');
+
+function portPoint(el) {
+  const r = el.getBoundingClientRect();
+  return { x: r.left - 16, y: r.top + r.height / 2 };
+}
+
+function setLock(el) {
+  if (el === lock.el) return;
+  lock.el = el;
+  lock.name = el ? el.querySelector('.link-name').textContent.toUpperCase() : '';
+  lock.offline = !!el && el.classList.contains('link--offline');
+  targetNameEl.textContent = !el ? 'FREE' : `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}`;
+  targetNameEl.style.color = !el ? '' : lock.offline ? '#ff3a00' : '#00ff66';
+  noteInput();
+}
+
+// pointerover/out bubble (enter/leave don't); the relatedTarget check
+// ignores moves between a row's own children (svg -> span etc.)
+nodeListEl.addEventListener('pointerover', e => {
+  const el = e.target.closest('.link');
+  if (el) setLock(el);
+});
+nodeListEl.addEventListener('pointerout', e => {
+  const el = e.target.closest('.link');
+  if (el && el === lock.el && !el.contains(e.relatedTarget)) setLock(null);
+});
+nodeListEl.addEventListener('focusin', e => {
+  const el = e.target.closest('.link');
+  if (el) setLock(el);
+});
+nodeListEl.addEventListener('focusout', e => {
+  const el = e.target.closest('.link');
+  if (el && el === lock.el && !el.contains(e.relatedTarget)) setLock(null);
+});
+// Keyboard activation gets the same press cycle as a click
+nodeListEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && lock.el && !lock.offline) {
+    const port = portPoint(lock.el);
+    noteInput();
+    triggerStamp(port.x, port.y);
+  }
+});
+
+// What the IK solver is steering the end-effector toward this frame
+function currentTarget() {
+  if (reduceMotion.matches) return getParkTarget();
+  if (lock.el && !lock.offline) return portPoint(lock.el);
+  return { x: mouse.x, y: mouse.y };
+}
+
+/* ============================================================
    STAMPING STATE MACHINE
    ============================================================ */
 const PHASE_IDLE = 0;
@@ -669,7 +738,7 @@ const stampHead = {
   phaseStart: 0,
   pistonExtension: 0,  // 0 = retracted, 1 = fully extended
   pressureRing: 0,     // shockwave ring opacity 0-1
-  pendingStamp: null,  // {x, y, reachable} - target location for next stamp
+  pendingStamp: null,  // {x, y, reachable, kind, label} - next stamp
   wasOutOfReach: false // tracks last click reachability for HUD/crosshair feedback
 };
 
@@ -704,20 +773,35 @@ const PHASE_DURATIONS = {
 
 function triggerStamp(x, y) {
   if (reduceMotion.matches) {
-    // No press cycle: the mark simply appears where the user clicked.
-    commitStamp(x, y, false);
+    // No press cycle: the mark simply appears where the user clicked
+    // (or on the port, if a node is locked).
+    if (lock.el && !lock.offline) {
+      const port = portPoint(lock.el);
+      commitStamp(port.x, port.y, 'route', lock.name);
+    } else {
+      commitStamp(x, y, 'mark');
+    }
     return;
   }
   // Queue the stamp; only re-trigger if currently idle
   // (prevents broken animation from rapid clicks)
   if (stampHead.phase === PHASE_IDLE) {
+    // Locked on a live node: the stamp goes on the port, not under
+    // the pointer, and is labelled with the node it routed to.
+    let kind = 'mark', label = '';
+    if (lock.el && !lock.offline) {
+      const port = portPoint(lock.el);
+      x = port.x; y = port.y;
+      kind = 'route';
+      label = lock.name;
+    }
     const reach = checkReach(x, y);
     stampHead.phase = PHASE_PRESS;
     stampHead.phaseStart = performance.now();
     // Store both target intent and reachability flag.
     // If unreachable, actual stamp coords will be resolved
     // at commit time from current EE position.
-    stampHead.pendingStamp = { x, y, reachable: reach.reachable };
+    stampHead.pendingStamp = { x, y, reachable: reach.reachable, kind, label };
     stampHead.wasOutOfReach = !reach.reachable;
   }
 }
@@ -751,16 +835,17 @@ function updateStampHead(now) {
       //   (the IK solver pushes the arm as far toward the target
       //   as the kinematic chain allows, then stops)
       let stampX, stampY;
-      if (stampHead.pendingStamp.reachable) {
-        stampX = stampHead.pendingStamp.x;
-        stampY = stampHead.pendingStamp.y;
+      const pending = stampHead.pendingStamp;
+      if (pending.reachable) {
+        stampX = pending.x;
+        stampY = pending.y;
       } else {
         const pts = forwardKinematics();
         const ee = pts[pts.length - 1];
         stampX = ee.x;
         stampY = ee.y;
       }
-      commitStamp(stampX, stampY, !stampHead.pendingStamp.reachable);
+      commitStamp(stampX, stampY, pending.reachable ? pending.kind : 'limit', pending.label);
       stampHead.pendingStamp = null;
     }
     if (t >= 1) {
@@ -785,13 +870,17 @@ const MAX_STAMPS = 30;
 const STAMP_LIFETIME = 3500; // ms
 const stamps = [];
 
-function commitStamp(x, y, wasUnreachable = false) {
+// kind: 'mark'  - free click, orange
+//       'limit' - target was out of reach, amber, stamped at the EE
+//       'route' - stamped on a node's port, green, label = node name
+function commitStamp(x, y, kind = 'mark', label = '') {
   const stamp = {
     x, y,
     born: performance.now(),
-    rotation: (Math.random() - 0.5) * 0.4, // slight random tilt
+    rotation: (Math.random() - 0.5) * (kind === 'route' ? 0.15 : 0.4), // routed seals sit straighter
     id: stampCounter++,
-    wasUnreachable // flag for distinct visual styling
+    kind,
+    label
   };
   stamps.push(stamp);
   if (stamps.length > MAX_STAMPS) stamps.shift();
@@ -816,14 +905,20 @@ function drawStamps(now) {
     ctx.rotate(s.rotation);
     ctx.globalAlpha = fade;
 
-    // Color scheme differs for unreachable stamps:
-    // - reachable: orange (normal stamp at clicked location)
-    // - unreachable: yellow/amber (stamp at arm's reach limit)
-    const mainColor = s.wasUnreachable ? '#ffb800' : '#ff6a00';
-    const accentColor = s.wasUnreachable ? '#ff3a00' : '#ffb800';
-    const fillRGBA = s.wasUnreachable
-      ? 'rgba(255, 184, 0, 0.15)'
-      : 'rgba(255, 106, 0, 0.15)';
+    // Palette per kind:
+    // - mark:  orange (free click at the pointer)
+    // - limit: amber  (target out of reach, stamped at the EE)
+    // - route: green  (sealed on a node's port)
+    const isLimit = s.kind === 'limit';
+    const isRoute = s.kind === 'route';
+    const mainColor = isRoute ? '#00ff66' : isLimit ? '#ffb800' : '#ff6a00';
+    const accentColor = isRoute ? '#b6ffd2' : isLimit ? '#ff3a00' : '#ffb800';
+    const fillRGBA = isRoute ? 'rgba(0, 255, 102, 0.12)'
+                   : isLimit ? 'rgba(255, 184, 0, 0.15)'
+                   : 'rgba(255, 106, 0, 0.15)';
+    // Routed seals sit on a row's left edge, so their labels go on the
+    // free side (left); everything else labels to the right.
+    const side = isRoute ? -1 : 1;
 
     // Outer hexagonal stamp boundary
     const r = 22;
@@ -860,30 +955,35 @@ function drawStamps(now) {
     ctx.fill();
 
     // ID label
-    ctx.fillStyle = s.wasUnreachable
-      ? 'rgba(255, 184, 0, 0.85)'
-      : 'rgba(255, 106, 0, 0.8)';
+    ctx.fillStyle = isRoute ? 'rgba(0, 255, 102, 0.85)'
+                  : isLimit ? 'rgba(255, 184, 0, 0.85)'
+                  : 'rgba(255, 106, 0, 0.8)';
     ctx.font = '8px JetBrains Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`#${String(s.id).padStart(3, '0')}`, r + 4, 3);
+    ctx.textAlign = side > 0 ? 'left' : 'right';
+    const lx = side * (r + 4);
+    ctx.fillText(`#${String(s.id).padStart(3, '0')}`, lx, 3);
 
     // Timestamp + status label
     ctx.fillStyle = 'rgba(136, 130, 120, 0.7)';
     ctx.font = '7px JetBrains Mono, monospace';
     const ms = Math.floor((now - s.born));
-    ctx.fillText(`T+${String(ms).padStart(4, '0')}ms`, r + 4, 13);
+    ctx.fillText(`T+${String(ms).padStart(4, '0')}ms`, lx, 13);
 
-    // Extra label for unreachable stamps
-    if (s.wasUnreachable) {
+    // Third line: LIMIT for out-of-reach, ROUTED // NODE for seals
+    if (isLimit) {
       ctx.fillStyle = 'rgba(255, 58, 0, 0.85)';
       ctx.font = '7px JetBrains Mono, monospace';
-      ctx.fillText('LIMIT', r + 4, 23);
+      ctx.fillText('LIMIT', lx, 23);
+    } else if (isRoute) {
+      ctx.fillStyle = 'rgba(0, 255, 102, 0.85)';
+      ctx.font = '7px JetBrains Mono, monospace';
+      ctx.fillText(`ROUTED // ${s.label}`, lx, 23);
     }
 
     // Subtle dashed accent ring
-    ctx.strokeStyle = s.wasUnreachable
-      ? 'rgba(255, 184, 0, 0.4)'
-      : 'rgba(255, 106, 0, 0.35)';
+    ctx.strokeStyle = isRoute ? 'rgba(0, 255, 102, 0.4)'
+                    : isLimit ? 'rgba(255, 184, 0, 0.4)'
+                    : 'rgba(255, 106, 0, 0.35)';
     ctx.lineWidth = 0.8;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -1295,13 +1395,8 @@ function render(now) {
   // Arm always tracks the pointer (mouse on desktop, last touch
   // point on mobile) - same behaviour on every platform - unless the
   // user asked for reduced motion, in which case it holds a park pose.
-  let ikDelta;
-  if (reduceMotion.matches) {
-    const park = getParkTarget();
-    ikDelta = solveIK(park.x, park.y);
-  } else {
-    ikDelta = solveIK(mouse.x, mouse.y);
-  }
+  const target = currentTarget();
+  const ikDelta = solveIK(target.x, target.y);
   armSettled = ikDelta < 1e-4;
 
   ctx.clearRect(0, 0, W, H);
@@ -1338,17 +1433,52 @@ function render(now) {
   const eeAngle = Math.atan2(ee.y - wrist.y, ee.x - wrist.x);
   drawStampHead(ee.x, ee.y, eeAngle, stampHead.pistonExtension);
 
-  // Layer 5: target crosshair at mouse - live reachability indicator
+  // Layer 5a: port marker while locked - a slowly rotating dashed ring
+  // on the node's port so the dock point is visible even before the
+  // arm arrives. Red and static when the node is offline.
+  if (lock.el && !reduceMotion.matches) {
+    const port = portPoint(lock.el);
+    ctx.save();
+    ctx.translate(port.x, port.y);
+    if (lock.offline) {
+      ctx.strokeStyle = 'rgba(255, 58, 0, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-5, -5); ctx.lineTo(5, 5);
+      ctx.moveTo(5, -5); ctx.lineTo(-5, 5);
+      ctx.stroke();
+    } else {
+      ctx.rotate(now / 900);
+      ctx.strokeStyle = 'rgba(0, 255, 102, 0.75)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#00ff66';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Layer 5b: target crosshair at mouse - live reachability indicator
   // (always "reachable" under reduced motion: the arm isn't tracking,
-  // and the stamp lands wherever the user clicks)
-  const liveReach = reduceMotion.matches ? { reachable: true } : checkReach(mouse.x, mouse.y);
+  // and the stamp lands wherever the user clicks; while locked the
+  // reach that matters is the port's, not the pointer's)
+  const liveReach = reduceMotion.matches ? { reachable: true }
+                  : checkReach(target.x, target.y);
   ctx.save();
   ctx.translate(mouse.x, mouse.y);
   // Color logic:
   // - during animation: amber (active)
+  // - locked on a live node: green / on an offline node: red
   // - hovering reachable point: orange
   // - hovering unreachable point: red (warning)
   const ringColor = stampHead.phase !== PHASE_IDLE ? '#ffb800'
+                  : lock.el ? (lock.offline ? '#ff3a00' : '#00ff66')
                   : (liveReach.reachable ? '#ff6a00' : '#ff3a00');
   ctx.strokeStyle = ringColor;
   ctx.fillStyle = ringColor;
@@ -1375,12 +1505,12 @@ function render(now) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Warning label below crosshair when out of reach
-  if (!liveReach.reachable && stampHead.phase === PHASE_IDLE) {
-    ctx.fillStyle = '#ff3a00';
+  // Label below crosshair: reach warning, or the lock state
+  if (stampHead.phase === PHASE_IDLE && (lock.el || !liveReach.reachable)) {
+    ctx.fillStyle = ringColor;
     ctx.font = '8px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('OUT OF REACH', 0, 34);
+    ctx.fillText(lock.el ? (lock.offline ? 'NO ROUTE' : 'LOCKED') : 'OUT OF REACH', 0, 34);
   }
   ctx.restore();
 
