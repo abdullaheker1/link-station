@@ -4,6 +4,27 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>shekerFND // LINK STATION</title>
+<meta name="description" content="shekerFND link station — Instagram, YouTube, GitHub, e-posta. İmleci takip eden 4 eksenli bir robot kol eşliğinde." />
+<meta name="theme-color" content="#0a0908" />
+<link rel="canonical" href="https://abdullaheker1.github.io/link-station/" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+
+<!-- Link previews (Instagram/WhatsApp/X/Discord read these) -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="shekerFND" />
+<meta property="og:title" content="shekerFND // LINK STATION" />
+<meta property="og:description" content="Instagram, YouTube, GitHub, e-posta — imleci takip eden 4 eksenli bir robot kol eşliğinde." />
+<meta property="og:url" content="https://abdullaheker1.github.io/link-station/" />
+<meta property="og:image" content="https://abdullaheker1.github.io/link-station/assets/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="LINK::STATION — turuncu endüstriyel robot kol, bağlantı panelindeki bir düğüme damga basıyor" />
+<meta property="og:locale" content="tr_TR" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="shekerFND // LINK STATION" />
+<meta name="twitter:description" content="Instagram, YouTube, GitHub, e-posta — imleci takip eden 4 eksenli bir robot kol eşliğinde." />
+<meta name="twitter:image" content="https://abdullaheker1.github.io/link-station/assets/og.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet" />
@@ -18,7 +39,7 @@
     --grid: rgba(255, 106, 0, 0.05);
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   html, body {
     height: 100%;
@@ -27,6 +48,17 @@
     color: var(--text);
     font-family: 'JetBrains Mono', monospace;
     cursor: crosshair;
+  }
+
+  /* On mouse/trackpad devices the canvas draws the reticle itself,
+     so the native cursor is hidden to avoid a double crosshair.
+     Touch devices have no cursor; the rule is a no-op there.
+     If the canvas loop ever dies (see window 'error' handler in the
+     script) the html.no-canvas class restores the native cursor. */
+  @media (pointer: fine) and (hover: hover) {
+    html:not(.no-canvas), html:not(.no-canvas) body, html:not(.no-canvas) .link {
+      cursor: none;
+    }
   }
 
   body::before {
@@ -81,6 +113,45 @@
   .hud-tl { top: 24px; left: 24px; }
   .hud-tr { top: 24px; right: 24px; text-align: right; }
   .hud-bl { bottom: 24px; left: 24px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.3em; }
+
+  /* Diagnostics toggle lives in the bottom-left HUD block; it is the
+     one HUD element that accepts input (and stays visible on phones). */
+  .diag-toggle {
+    pointer-events: auto;
+    background: rgba(10, 9, 8, 0.6);
+    border: 1px solid rgba(255, 106, 0, 0.35);
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    padding: 4px 8px;
+    margin-left: 14px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .diag-toggle:hover,
+  .diag-toggle:focus-visible,
+  html.diag .diag-toggle {
+    color: var(--kuka-yellow);
+    border-color: var(--kuka-yellow);
+    outline: none;
+  }
+
+  /* Diagnostics readout - right side under the status HUD */
+  .diag-panel {
+    position: fixed; z-index: 31;
+    top: 96px; right: 24px;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    padding: 10px 12px;
+    background: rgba(10, 9, 8, 0.82);
+    border: 1px solid rgba(255, 184, 0, 0.35);
+    color: var(--kuka-yellow);
+    font-size: 10px;
+    line-height: 1.7;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+  }
+  .diag-panel pre { font: inherit; margin: 0; white-space: pre; overflow-x: auto; }
   .hud-br { bottom: 24px; right: 24px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.3em; text-align: right; }
 
   .dot {
@@ -91,6 +162,12 @@
     box-shadow: 0 0 8px #00ff66;
     animation: pulse 1.5s infinite;
     vertical-align: middle;
+  }
+  /* Render loop asleep (no input, nothing animating) */
+  .dot.standby {
+    background: var(--kuka-yellow);
+    box-shadow: 0 0 8px var(--kuka-yellow);
+    animation: none;
   }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
@@ -163,6 +240,8 @@
   .panel-header {
     display: flex;
     justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
     font-size: 9px;
     letter-spacing: 0.25em;
     color: var(--text-dim);
@@ -177,7 +256,6 @@
     align-items: center;
     gap: 14px;
     padding: 12px 14px;
-    margin-bottom: 8px;
     background: rgba(42, 40, 38, 0.55);
     border: 1px solid rgba(138, 133, 128, 0.15);
     color: var(--text);
@@ -187,9 +265,9 @@
     font-weight: 500;
     transition: all 0.2s ease;
     position: relative;
-    cursor: pointer;
   }
-  .link:last-of-type { margin-bottom: 0; }
+  .node-list { list-style: none; margin: 0; padding: 0; }
+  .node-list li + li { margin-top: 8px; }
 
   .link::before {
     content: '';
@@ -208,6 +286,24 @@
   }
   .link:hover::before { transform: scaleY(1); }
   .link:active { transform: translateX(4px) scale(0.98); }
+
+  /* Keyboard navigation: Tab moves between nodes; the focused node
+     gets the same treatment as hover plus a visible outline. */
+  .link:focus-visible {
+    outline: 2px solid var(--kuka-yellow);
+    outline-offset: 2px;
+    background: rgba(255, 106, 0, 0.1);
+    border-color: var(--kuka-orange);
+  }
+  .link:focus-visible::before { transform: scaleY(1); }
+
+  /* Reduced motion: no pulsing LED, no hover slides. The arm itself
+     is handled in the script (parks and stops tracking the pointer). */
+  @media (prefers-reduced-motion: reduce) {
+    .dot { animation: none; }
+    .link, .link::before, .link-arrow { transition: none; }
+    .link:hover, .link:active { transform: none; }
+  }
 
   .link-icon {
     width: 22px; height: 22px;
@@ -233,6 +329,36 @@
     font-size: 14px;
     color: var(--text-dim);
     transition: all 0.2s ease;
+  }
+
+  /* OFFLINE node: a link whose url is empty in links.js. Rendered as
+     a non-interactive row with a red status LED so the slot is
+     visibly reserved rather than a dead href="#". */
+  .link--offline {
+    opacity: 0.55;
+    border-style: dashed;
+  }
+  .link--offline:hover {
+    transform: none;
+    background: rgba(42, 40, 38, 0.55);
+    border-color: rgba(255, 58, 0, 0.6);
+  }
+  .link--offline:hover::before { transform: scaleY(0); }
+  .link--offline .link-icon,
+  .link--offline .link-name { color: var(--text-dim); }
+  .link--offline .link-handle {
+    color: #ff3a00;
+    letter-spacing: 0.2em;
+  }
+  .link--offline .link-handle::before {
+    content: '';
+    display: inline-block;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #ff3a00;
+    box-shadow: 0 0 6px #ff3a00;
+    margin-right: 6px;
+    vertical-align: middle;
   }
   .link:hover .link-arrow {
     color: var(--kuka-orange);
@@ -263,23 +389,54 @@
        touch point. Only the HUD is simplified.
      ============================================================ */
   @media (max-width: 768px) {
-    /* Hide all corner telemetry - only the OPERATOR tag in the
-       header remains (it lives inside flow, never overlaps) */
-    .hud-tl, .hud-tr, .hud-bl, .hud-br {
-      display: none;
+    /* The page is allowed to scroll on phones. With overflow:hidden
+       the bottom links were unreachable on short viewports
+       (<= ~570px, e.g. iPhone SE). 100dvh tracks the *dynamic*
+       viewport, so the collapsing URL bar no longer changes the
+       layout height. The canvas is position:fixed and unaffected. */
+    html, body {
+      height: auto;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
 
-    /* Panel tightened for small viewports */
+    /* Hide all corner telemetry - only the OPERATOR tag in the
+       header remains (it lives inside flow, never overlaps) */
+    .hud-tl, .hud-tr, .hud-br {
+      display: none;
+    }
+    /* ...except the diagnostics toggle: keep the block, drop the
+       version string, enlarge the tap target */
+    .hud-bl { bottom: 16px; left: auto; right: 16px; }
+    .hud-bl .ver { display: none; }
+    .diag-toggle { margin-left: 0; padding: 7px 10px; font-size: 10px; }
+
+    /* Readout becomes a bottom sheet above the toggle */
+    .diag-panel {
+      top: auto; right: 12px; bottom: 52px; left: 12px;
+      width: auto;
+      font-size: 9px;
+      line-height: 1.6;
+    }
+
+    /* Panel tightened and pushed right, leaving a 64px rail on the
+       left where the arm lives: its base sits at the bottom of the
+       rail and every node's port is inside it, so the arm reaches
+       all nodes without crossing the text. */
     .panel {
       padding: 16px;
+      width: min(420px, calc(100% - 64px));
+      margin-left: 64px;
     }
 
     .container {
       padding: 16px;
       justify-content: flex-start;
-      padding-top: 8vh;
+      padding-top: 6vh;
+      padding-bottom: 72px;   /* room for the fixed DIAG toggle on short screens */
       height: auto;
-      min-height: 100vh;
+      min-height: 100dvh;
     }
 
     .title {
@@ -309,22 +466,24 @@
 </head>
 <body>
 
-<canvas id="robotCanvas"></canvas>
+<canvas id="robotCanvas" aria-hidden="true"></canvas>
 
-<div class="hud hud-tl">
+<div class="hud hud-tl" aria-hidden="true">
   <div><span class="label">SYS:</span> <span class="val">KR-4DOF</span></div>
   <div><span class="label">MODE:</span> STAMP-IK</div>
   <div><span class="label">EE:</span> <span id="eePos">000, 000</span></div>
+  <div><span class="label">TGT:</span> <span id="targetName">FREE</span></div>
 </div>
 
-<div class="hud hud-tr">
-  <div><span class="dot"></span><span class="val">ONLINE</span></div>
+<div class="hud hud-tr" aria-hidden="true">
+  <div><span class="dot" id="sysDot"></span><span class="val" id="sysState">ONLINE</span></div>
   <div><span class="label">HEAD:</span> <span id="gripState" class="val">IDLE</span></div>
   <div><span class="label">STAMPS:</span> <span id="stampCount" class="val">000</span></div>
 </div>
 
-<div class="hud hud-bl">// LINK_STATION_v2.6 // EST.2026</div>
-<div class="hud hud-br">SHEKERFND // ASABEES</div>
+
+<div class="diag-panel" id="diagPanel" hidden aria-hidden="true"><pre id="diagText"></pre></div>
+<div class="hud hud-br" aria-hidden="true">SHEKERFND // ASABEES</div>
 
 <div class="container">
   <div class="header">
@@ -336,68 +495,93 @@
   <div class="panel">
     <div class="panel-header">
       <span>[ AVAILABLE_NODES ]</span>
-      <span class="right">06 ACTIVE</span>
+      <span class="right" id="nodeCount">-- ACTIVE</span>
     </div>
 
-    <a href="https://www.instagram.com/as.eker?igsh=OHd5MXFxOWtwMTZt" class="link" target="_blank" rel="noopener">
-      <svg class="link-icon" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
-      <div class="link-text">
-        <span class="link-name">Instagram</span>
-        <span class="link-handle">@as.eker</span>
-      </div>
-      <span class="link-arrow">→</span>
-    </a>
-
-    <a href="https://www.youtube.com/@shiekerFND" class="link" target="_blank" rel="noopener">
-      <svg class="link-icon" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-      <div class="link-text">
-        <span class="link-name">YouTube</span>
-        <span class="link-handle">@shiekerFND</span>
-      </div>
-      <span class="link-arrow">→</span>
-    </a>
-
-    <a href="https://github.com/abdullaheker1" class="link" target="_blank" rel="noopener">
-      <svg class="link-icon" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-      <div class="link-text">
-        <span class="link-name">GitHub</span>
-        <span class="link-handle">/abdullaheker1</span>
-      </div>
-      <span class="link-arrow">→</span>
-    </a>
-
-    <a href="#" class="link" target="_blank" rel="noopener">
-      <svg class="link-icon" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.063 2.063 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-      <div class="link-text">
-        <span class="link-name">------------</span>
-        <span class="link-handle">------------</span>
-      </div>
-      <span class="link-arrow">→</span>
-    </a>
-
-    <a href="#" class="link" target="_blank" rel="noopener">
-      <svg class="link-icon" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-      <div class="link-text">
-        <span class="link-name">X / ------------</span>
-        <span class="link-handle">------------</span>
-      </div>
-      <span class="link-arrow">→</span>
-    </a>
-
-    <a href="mailto:abdullaheker1995@gmail.com" class="link">
-      <svg class="link-icon" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></svg>
-      <div class="link-text">
-        <span class="link-name">E-Mail</span>
-        <span class="link-handle">contact@</span>
-      </div>
-      <span class="link-arrow">→</span>
-    </a>
+    <nav aria-label="Nodes">
+      <ul class="node-list" id="nodeList">
+        <!-- filled from links.js by renderNodes() -->
+      </ul>
+    </nav>
 
     <div class="stripe"></div>
   </div>
 </div>
 
+<!-- After the panel in DOM order so Tab reaches the nodes first -->
+<div class="hud hud-bl">
+  <span class="ver" aria-hidden="true">// LINK_STATION_v3.1 // EST.2026</span>
+  <button class="diag-toggle" id="diagBtn" type="button" aria-pressed="false" title="Diagnostics overlay (D)">[ DIAG: OFF ]</button>
+</div>
+
+<script src="icons.js"></script>
+<script src="links.js"></script>
 <script>
+/* ============================================================
+   NODE PANEL - built from links.js
+   ------------------------------------------------------------
+   Nodes with a url become <a> elements (external links open in a
+   new tab, mailto: stays in-tab). Nodes with an empty url become
+   non-interactive OFFLINE rows. The header count is derived from
+   the data so it can't drift from the list.
+   ============================================================ */
+function renderNodes() {
+  const list = document.getElementById('nodeList');
+  const countEl = document.getElementById('nodeCount');
+  const nodes = window.STATION_NODES || [];
+  const icons = window.STATION_ICONS || {};
+  const pad2 = n => String(n).padStart(2, '0');
+  let active = 0, offline = 0;
+
+  list.textContent = '';
+  for (const node of nodes) {
+    const isOffline = !node.url;
+    const li = document.createElement('li');
+    const el = document.createElement(isOffline ? 'div' : 'a');
+    el.className = 'link' + (isOffline ? ' link--offline' : '');
+    if (isOffline) {
+      el.setAttribute('aria-disabled', 'true');
+      offline++;
+    } else {
+      el.href = node.url;
+      if (!node.url.startsWith('mailto:')) {
+        el.target = '_blank';
+        el.rel = 'noopener';
+      }
+      active++;
+    }
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'link-icon');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', icons[node.icon] || '');
+    svg.appendChild(path);
+
+    const text = document.createElement('div');
+    text.className = 'link-text';
+    const name = document.createElement('span');
+    name.className = 'link-name';
+    name.textContent = node.name;
+    const handle = document.createElement('span');
+    handle.className = 'link-handle';
+    handle.textContent = isOffline ? 'OFFLINE' : node.handle;
+    text.append(name, handle);
+
+    const arrow = document.createElement('span');
+    arrow.className = 'link-arrow';
+    arrow.textContent = isOffline ? '\u00d7' : '\u2192';
+
+    el.append(svg, text, arrow);
+    li.appendChild(el);
+    list.appendChild(li);
+  }
+
+  countEl.textContent = `${pad2(active)} ACTIVE` + (offline ? ` \u00b7 ${pad2(offline)} OFFLINE` : '');
+}
+renderNodes();
+
 /* ============================================================
    4-DOF ARM + PNEUMATIC STAMPING HEAD
    ------------------------------------------------------------
@@ -419,9 +603,14 @@
    over ~3.5s with cubic ease-out, then is recycled.
    ============================================================ */
 
+// Safety net for the hidden native cursor (see CSS): any uncaught
+// error in this script restores it so the page stays usable.
+window.addEventListener('error', () => document.documentElement.classList.add('no-canvas'));
+
 const canvas = document.getElementById('robotCanvas');
 const ctx = canvas.getContext('2d');
 const dpr = window.devicePixelRatio || 1;
+const DEG = Math.PI / 180;
 
 let W = 0, H = 0;
 function resize() {
@@ -437,6 +626,16 @@ resize();
 
 const mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
+// prefers-reduced-motion: the arm parks beside the panel instead of
+// sweeping after the pointer, and clicks stamp instantly (no piston
+// animation). Fades and the reticle are left as-is; they don't move.
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+function getParkTarget() {
+  if (isMobile()) return homeTarget();
+  const base = getBase();
+  return { x: base.x + W * 0.14, y: H * 0.48, toolAngle: null };
+}
+
 // Debounced resize: mobile browsers fire resize constantly as
 // the URL bar shows/hides. Debounce avoids thrashing the
 // kinematics. orientationchange is explicit for older browsers
@@ -444,22 +643,62 @@ const mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 let resizeTimer = null;
 function handleResize() {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { resize(); computeLengths(); }, 120);
+  // Setting canvas.width clears the bitmap, so a sleeping loop must be
+  // woken to repaint after the resize.
+  resizeTimer = setTimeout(() => { resize(); computeLengths(); wake(); }, 120);
 }
 window.addEventListener('resize', handleResize);
 window.addEventListener('orientationchange', handleResize);
-window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-window.addEventListener('mousedown', e => triggerStamp(e.clientX, e.clientY));
+
+/* ------------------------------------------------------------
+   Render scheduling
+   The loop only runs while something on screen can change: the
+   pointer moved recently, a press cycle is running, stamps are
+   still fading, or the arm hasn't settled on its target. Otherwise
+   it stops (no rAF, no canvas work at all) and the HUD shows
+   STANDBY. Any input wakes it. On phones this is the difference
+   between a warm pocket and an idle tab.
+   ------------------------------------------------------------ */
+const SETTLE_MS = 1200;      // keep drawing this long after the last input
+// On touch devices a tapped node stays "hovered" until the next tap, so
+// only mouse/trackpad devices keep the loop alive for the lock ring.
+const hoverCapable = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+let lastInput = performance.now();
+let loopActive = false;
+let armSettled = false;      // set by solveIK each frame
+
+function wake() {
+  if (loopActive) return;
+  loopActive = true;
+  requestAnimationFrame(render);
+}
+function noteInput() {
+  lastInput = performance.now();
+  wake();
+}
+
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; noteInput(); });
+window.addEventListener('mousedown', e => {
+  if (e.target.closest('button')) return;   // HUD controls don't stamp
+  noteInput();
+  triggerStamp(e.clientX, e.clientY);
+});
 window.addEventListener('touchmove', e => {
-  if (e.touches[0]) { mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; }
+  if (e.touches[0]) { mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; noteInput(); }
 }, { passive: true });
 window.addEventListener('touchstart', e => {
+  if (e.target.closest('button')) return;
   if (e.touches[0]) {
     mouse.x = e.touches[0].clientX;
     mouse.y = e.touches[0].clientY;
+    touch.active = true;
+    noteInput();
     triggerStamp(mouse.x, mouse.y);
   }
 }, { passive: true });
+const touchDone = () => { touch.active = false; noteInput(); };
+window.addEventListener('touchend', touchDone, { passive: true });
+window.addEventListener('touchcancel', touchDone, { passive: true });
 
 // Mobile detection - matches the CSS breakpoint so JS layout
 // math stays in sync with the visual layout
@@ -469,37 +708,307 @@ function isMobile() {
 
 function getBase() {
   if (isMobile()) {
-    // On mobile the arm is a dim background element. Anchor it
-    // lower-left but pull slightly off-screen so the elbow sweep
-    // sits behind the panel instead of across the title.
-    return { x: W * 0.10, y: H - 30 };
+    // Phones: bottom of the left rail (see the mobile CSS).
+    return { x: 34, y: H - 26 };
   }
   return { x: W * 0.16, y: H - 50 };
 }
 
-let armLengths = [];
-function computeLengths() {
-  let total;
-  if (isMobile()) {
-    // Width-based, not diagonal-based: tall narrow phones have a
-    // huge diagonal relative to width, which previously made the
-    // arm overshoot across the whole screen. Scale to width and
-    // cap so the arm stays compact behind the content.
-    total = Math.min(W * 1.15, H * 0.55);
-  } else {
-    const diag = Math.hypot(W, H);
-    total = diag * 0.55;
-  }
-  armLengths = [
-    total * 0.34,
-    total * 0.28,
-    total * 0.18,
-    total * 0.10
-  ];
+// Where the arm waits on phones when nothing is asking for it. HOME_Q
+// is given as joint angles, not as a point to solve for: a folded
+// zig-zag that stays inside the 64px rail (elbow a hair off the left
+// edge, head raised and pointing up-right). Desktop has no home; the
+// arm follows the pointer.
+function homeTarget() {
+  const pts = forwardKinematics(HOME_Q);
+  const ee = pts[pts.length - 1];
+  return { x: ee.x, y: ee.y, toolAngle: null, pose: HOME_Q };
 }
-computeLengths();
 
-const angles = [-Math.PI / 2, -Math.PI / 3, -Math.PI / 6, 0];
+// Touch is only "steering" the arm while a finger is down.
+const touch = { active: false };
+
+let armLengths = [];
+const LINK_FRACTIONS = [0.34, 0.28, 0.18, 0.10];
+function setLengths(total) {
+  armLengths = LINK_FRACTIONS.map(f => total * f);
+}
+function computeLengths() {
+  if (isMobile()) {
+    // Size the arm to its workbench: start compact and grow until the
+    // docking pose can reach every node's port (the top one is the
+    // demanding case), capped so a very long node list doesn't produce
+    // an absurd arm - anything still out of reach gets LIMIT stamps.
+    let total = Math.min(W * 1.15, H * 0.55);
+    const cap = H * 0.95;
+    setLengths(total);
+    const ports = [...document.querySelectorAll('#nodeList .link')].map(portPoint);
+    for (let i = 0; i < 16 && total < cap; i++) {
+      // "Too far" = the docking elbow point is near or beyond the outer
+      // ring; ports beside the base (inner-ring cases on very short
+      // screens) can't be fixed by a longer arm and are left alone.
+      const tooFar = ports.some(pt => {
+        const r = checkReach(pt.x, pt.y, dockToolAngle());
+        return r.distance > r.maxReach * 0.92;
+      });
+      if (!tooFar) break;
+      total = Math.min(cap, total * 1.06);
+      setLengths(total);
+    }
+  } else {
+    setLengths(Math.hypot(W, H) * 0.55);
+  }
+}
+// (first call is at the end of the script, once ports and joint ranges exist)
+
+/* ============================================================
+   JOINT STATE
+   ------------------------------------------------------------
+   q[i]     = joint angle, RELATIVE to the previous link (q[0] is
+              absolute, measured from screen +x; screen y points
+              down, so negative = counter-clockwise = "up").
+   goalQ[i] = where the IK solver wants each joint to be.
+   The motors (see MOTORS below) drive q toward goalQ with real
+   velocity and acceleration limits; the arm is drawn from q.
+   Absolute link angles are the running sum of q (see forwardKinematics).
+   ============================================================ */
+const HOME_Q = [-100 * DEG, 20 * DEG, -20 * DEG, 40 * DEG];   // phone rest pose (see homeTarget)
+const q     = isMobile() ? HOME_Q.slice() : [-Math.PI / 2, Math.PI / 6, Math.PI / 6, Math.PI / 6];
+const goalQ = q.slice();
+const jointVel = [0, 0, 0, 0];   // rad/s
+
+// Joint range. Index 0 is absolute: the base link stays at least 30
+// degrees above the floor, like an arm on a pedestal. The others are
+// relative to the previous link, which is what stops the wrist from
+// folding back on itself when docking.
+const JOINT_MIN = [-150 * DEG, -152 * DEG, -125 * DEG, -100 * DEG];
+const JOINT_MAX = [ -30 * DEG,  152 * DEG,  125 * DEG,  100 * DEG];
+
+
+// Per-joint motor limits: smaller links spin faster, like a real arm.
+const MOTORS = [
+  { vMax: 2.4 /* rad/s */, aMax:  9 /* rad/s^2 */ },
+  { vMax: 3.4,             aMax: 14 },
+  { vMax: 5.0,             aMax: 24 },
+  { vMax: 7.0,             aMax: 36 },
+];
+
+const wrapPI = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+
+/* ============================================================
+   NODE LOCK
+   ------------------------------------------------------------
+   Hovering (or keyboard-focusing) a node in the panel hands the
+   arm a target: the node's "port", just left of the row where the
+   orange hover bar is. The reticle stays with the pointer; the arm
+   docks on the port. Clicking while locked stamps ROUTED on the
+   port instead of a free mark. Offline rows can be hovered but the
+   arm refuses to dock on them (HUD shows OFFLINE, reticle turns red).
+   ============================================================ */
+const lock = { el: null, name: '', offline: false };
+const nodeListEl = document.getElementById('nodeList');
+const targetNameEl = document.getElementById('targetName');
+
+function portPoint(el) {
+  const r = el.getBoundingClientRect();
+  return { x: r.left - 16, y: r.top + r.height / 2 };
+}
+
+function setLock(el) {
+  if (el === lock.el) return;
+  lock.el = el;
+  lock.name = el ? el.querySelector('.link-name').textContent.toUpperCase() : '';
+  lock.offline = !!el && el.classList.contains('link--offline');
+  targetNameEl.textContent = !el ? 'FREE' : `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}`;
+  targetNameEl.style.color = !el ? '' : lock.offline ? '#ff3a00' : '#00ff66';
+  noteInput();
+}
+
+// pointerover/out bubble (enter/leave don't); the relatedTarget check
+// ignores moves between a row's own children (svg -> span etc.)
+nodeListEl.addEventListener('pointerover', e => {
+  const el = e.target.closest('.link');
+  if (el) setLock(el);
+});
+nodeListEl.addEventListener('pointerout', e => {
+  const el = e.target.closest('.link');
+  if (el && el === lock.el && !el.contains(e.relatedTarget)) setLock(null);
+});
+nodeListEl.addEventListener('focusin', e => {
+  const el = e.target.closest('.link');
+  if (el) setLock(el);
+});
+nodeListEl.addEventListener('focusout', e => {
+  const el = e.target.closest('.link');
+  if (el && el === lock.el && !el.contains(e.relatedTarget)) setLock(null);
+});
+// Keyboard activation gets the same press cycle as a click
+nodeListEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && lock.el && !lock.offline) {
+    const port = portPoint(lock.el);
+    noteInput();
+    triggerStamp(port.x, port.y);
+  }
+});
+
+// What the IK solver is steering the end-effector toward this frame,
+// and how the tool should be oriented there (null = free).
+// A running stamp job wins: the arm finishes what it was told to do
+// before it goes back to following the pointer.
+function currentTarget() {
+  if (reduceMotion.matches) return getParkTarget();
+  if (stampHead.job) return { x: stampHead.job.x, y: stampHead.job.y, toolAngle: stampHead.job.toolAngle };
+  if (lock.el && !lock.offline) return { ...portPoint(lock.el), toolAngle: dockToolAngle() };
+  if (isMobile() && !touch.active) return homeTarget();
+  return { x: mouse.x, y: mouse.y, toolAngle: null };
+}
+
+/* ============================================================
+   DIAGNOSTICS OVERLAY
+   ------------------------------------------------------------
+   Toggle with D, the [ DIAG ] button, or ?diag in the URL. Shows
+   what the solver sees: the workspace annulus, the link skeleton
+   with joint angles (A1..A4, up = positive) and link lengths, the
+   EE -> target vector with its error, plus a text readout of the
+   solver, loop and stamp state. Purely additive; the arm is drawn
+   at 35% so the skeleton reads on top of it.
+   ============================================================ */
+const diagPanelEl = document.getElementById('diagPanel');
+const diagTextEl = document.getElementById('diagText');
+const diagBtnEl = document.getElementById('diagBtn');
+let diag = false;
+let lastFrameAt = 0;
+let frameMs = 0;
+
+function setDiag(on) {
+  diag = on;
+  document.documentElement.classList.toggle('diag', on);
+  diagPanelEl.hidden = !on;
+  diagBtnEl.textContent = `[ DIAG: ${on ? 'ON' : 'OFF'} ]`;
+  diagBtnEl.setAttribute('aria-pressed', String(on));
+  noteInput();
+}
+diagBtnEl.addEventListener('click', () => setDiag(!diag));
+window.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'd' || e.key === 'D') setDiag(!diag);
+});
+if (new URLSearchParams(location.search).has('diag')) setDiag(true);
+
+const RAD2DEG = 180 / Math.PI;
+// Joint angle as a controller would report it: positive counter-
+// clockwise on screen (i.e. "up" is positive).
+const jointDeg = (i, joints = q) => -wrapPI(joints[i]) * RAD2DEG;
+const fmtDeg = d => ((d < 0 ? '-' : '+') + Math.abs(d).toFixed(1)).padStart(6, ' ') + '\u00b0';
+const pad3 = n => String(Math.round(n)).padStart(3, '0');
+const pad4 = n => String(Math.round(n)).padStart(4, ' ');
+
+function drawDiagnostics(pts, target, now) {
+  const base = pts[0];
+  const ee = pts[pts.length - 1];
+  const reach = checkReach(target.x, target.y, target.toolAngle);
+  const err = Math.hypot(target.x - ee.x, target.y - ee.y);
+  const goalPts = forwardKinematics(goalQ);
+
+  ctx.save();
+  ctx.font = '8px JetBrains Mono, monospace';
+  ctx.lineWidth = 1;
+
+  // Workspace: the two-link ring the elbow point must fall in
+  ctx.strokeStyle = 'rgba(255, 184, 0, 0.35)';
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath();
+  ctx.arc(reach.cx, reach.cy, reach.maxReach, 0, Math.PI * 2);
+  ctx.stroke();
+  if (reach.minReach > 0) {
+    ctx.beginPath();
+    ctx.arc(reach.cx, reach.cy, reach.minReach, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255, 184, 0, 0.7)';
+  ctx.textAlign = 'left';
+  ctx.fillText(`ELBOW RING ${Math.round(reach.minReach)}..${Math.round(reach.maxReach)}`, reach.cx + 6, reach.cy - reach.maxReach + 12);
+  // The elbow point the posture rule wants inside that ring
+  ctx.strokeStyle = reach.reachable ? 'rgba(0, 255, 102, 0.8)' : 'rgba(255, 58, 0, 0.8)';
+  ctx.strokeRect(reach.elbowX - 4, reach.elbowY - 4, 8, 8);
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.fillText('ELBOW PT', reach.elbowX + 8, reach.elbowY - 6);
+
+  // Base frame
+  ctx.strokeStyle = '#ff6a00';
+  ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(base.x + 36, base.y); ctx.stroke();
+  ctx.fillStyle = '#ff6a00';
+  ctx.fillText('X', base.x + 40, base.y + 3);
+  ctx.strokeStyle = '#ffb800';
+  ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(base.x, base.y - 36); ctx.stroke();
+  ctx.fillStyle = '#ffb800';
+  ctx.fillText('Y', base.x - 3, base.y - 42);
+
+  // Goal pose (where the motors are heading) as a faint ghost
+  ctx.strokeStyle = 'rgba(0, 255, 102, 0.35)';
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  goalPts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (let i = 1; i < goalPts.length; i++) {
+    ctx.beginPath(); ctx.arc(goalPts[i].x, goalPts[i].y, 3, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // Skeleton (actual motor state)
+  ctx.strokeStyle = '#ffb800';
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+
+  // Joints: ring, A{i} angle; link length at each midpoint
+  for (let i = 0; i < q.length; i++) {
+    const j = pts[i], k = pts[i + 1];
+    ctx.strokeStyle = '#ffb800';
+    ctx.beginPath(); ctx.arc(j.x, j.y, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#ffb800';
+    ctx.fillText(`A${i + 1} ${fmtDeg(jointDeg(i)).trim()}`, j.x + 10, j.y - 10);
+    ctx.fillStyle = 'rgba(232, 227, 220, 0.6)';
+    ctx.fillText(`L${i + 1} ${Math.round(armLengths[i])}`, (j.x + k.x) / 2 + 8, (j.y + k.y) / 2 + 12);
+  }
+
+  // EE -> target vector
+  const vecColor = reach.reachable ? 'rgba(0, 255, 102, 0.8)' : 'rgba(255, 58, 0, 0.8)';
+  ctx.strokeStyle = vecColor;
+  ctx.fillStyle = vecColor;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(ee.x, ee.y); ctx.lineTo(target.x, target.y); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.arc(target.x, target.y, 6, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(ee.x, ee.y, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillText(`ERR ${err.toFixed(1)}px`, (ee.x + target.x) / 2 + 8, (ee.y + target.y) / 2 - 4);
+  ctx.restore();
+
+  // Readout
+  const loopMs = frameMs > 0 && frameMs < 250 ? frameMs.toFixed(1).padStart(5, ' ') + ' ms' : '   -- ms';
+  const tgtLabel = reduceMotion.matches ? 'PARK'
+                 : stampHead.job ? 'JOB'
+                 : lock.el ? `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}`
+                 : target.pose ? 'HOME' : 'FREE';
+  const toolTxt = target.toolAngle === null ? 'free' : `tool ${Math.round(-target.toolAngle * RAD2DEG)}\u00b0`;
+  const lines = [
+    'DIAGNOSTICS              [D] TOGGLE',
+    `SOLVER   analytic 2R+wrist  ${toolTxt}  ${armSettled ? 'SETTLED' : 'MOVING'}`,
+    `MOTORS   err ${(motorState.maxErr * RAD2DEG).toFixed(2).padStart(6, ' ')}\u00b0  v ${(motorState.maxVel * RAD2DEG).toFixed(0).padStart(4, ' ')}\u00b0/s`,
+    `LOOP     ${loopActive ? 'ONLINE ' : 'STANDBY'} ${loopMs}`,
+    `TARGET   ${pad4(target.x)}, ${pad4(target.y)}  ${tgtLabel}`,
+    `EE       ${pad4(ee.x)}, ${pad4(ee.y)}  ERR ${err.toFixed(1)} px`,
+    `REACH    ${Math.round(reach.minReach)} .. ${Math.round(reach.maxReach)} px  ${reach.reachable ? 'IN RANGE' : 'OUT OF RANGE'}`,
+    '         actual    goal      vel      L',
+  ];
+  for (let i = 0; i < q.length; i++) {
+    lines.push(`A${i + 1}  ${fmtDeg(jointDeg(i))}  ${fmtDeg(jointDeg(i, goalQ))}  ${(-jointVel[i] * RAD2DEG).toFixed(0).padStart(5, ' ')}\u00b0/s  ${String(Math.round(armLengths[i])).padStart(4, ' ')}`);
+  }
+  lines.push(`STAMPS   ${pad3(stamps.length)} active / ${pad3(stampCounter)} total`);
+  lines.push(`HEAD     ${PHASE_NAMES[stampHead.phase]}  piston ${(stampHead.pistonExtension * 100).toFixed(0).padStart(3, ' ')}%`);
+  diagTextEl.textContent = lines.join('\n');
+}
 
 /* ============================================================
    STAMPING STATE MACHINE
@@ -508,56 +1017,85 @@ const PHASE_IDLE = 0;
 const PHASE_PRESS = 1;
 const PHASE_PRINT = 2;
 const PHASE_RETRACT = 3;
+const PHASE_APPROACH = 4;   // travelling to the job before pressing
 
 const stampHead = {
   phase: PHASE_IDLE,
   phaseStart: 0,
   pistonExtension: 0,  // 0 = retracted, 1 = fully extended
   pressureRing: 0,     // shockwave ring opacity 0-1
-  pendingStamp: null,  // {x, y, reachable} - target location for next stamp
+  pendingStamp: null,  // {x, y, reachable, kind, label} - next stamp
+  job: null,           // {x, y, toolAngle} the arm is committed to until IDLE
   wasOutOfReach: false // tracks last click reachability for HUD/crosshair feedback
 };
 
+// Tool orientation used when meeting a port: straight into the row on
+// desktop; from below-left on phones, where the port sits in a narrow
+// rail and a horizontal tool would put the wrist off-screen.
+function dockToolAngle() {
+  return isMobile() ? -45 * DEG : 0;
+}
+
 /* ----------------------------------------------------------
-   Reachability test - is target inside annular workspace?
-   - Outer bound: sum of all link lengths
-   - Inner bound: longest link - sum of others (can't fold tighter)
-   Returns { reachable, distance, maxReach, minReach }
+   Reachability test
+   Exact for the posture rule: the target is reachable iff the elbow
+   point it implies lies inside the two-link ring around the base.
+   Returns the ring (for the diagnostics overlay) and the elbow point.
    ---------------------------------------------------------- */
-function checkReach(targetX, targetY) {
-  const base = getBase();
-  const dx = targetX - base.x;
-  const dy = targetY - base.y;
-  const distance = Math.hypot(dx, dy);
-
-  const maxReach = armLengths.reduce((a, b) => a + b, 0);
-  const longest = Math.max(...armLengths);
-  const rest = maxReach - longest;
-  const minReach = Math.max(0, longest - rest);
-
+function checkReach(targetX, targetY, toolAngle = null) {
+  const { base, elbowX, elbowY } = posture(targetX, targetY, toolAngle);
+  const ring = twoLinkRing();
+  const distance = Math.hypot(elbowX - base.x, elbowY - base.y);
   // Tolerance: leave 2px breathing room so stamps right at the
   // edge don't oscillate between reachable/unreachable
-  const reachable = distance <= maxReach - 2 && distance >= minReach;
-  return { reachable, distance, maxReach, minReach };
+  const reachable = distance <= ring.outer - 2 && distance >= ring.inner + 2;
+  return { reachable, distance, maxReach: ring.outer, minReach: ring.inner, cx: base.x, cy: base.y, elbowX, elbowY };
 }
 
 const PHASE_DURATIONS = {
+  [PHASE_APPROACH]: 1500,   // upper bound; normally ends on arrival
   [PHASE_PRESS]: 140,
   [PHASE_PRINT]: 60,
   [PHASE_RETRACT]: 260
 };
 
 function triggerStamp(x, y) {
+  if (reduceMotion.matches) {
+    // No press cycle: the mark simply appears where the user clicked
+    // (or on the port, if a node is locked).
+    if (lock.el && !lock.offline) {
+      const port = portPoint(lock.el);
+      commitStamp(port.x, port.y, 'route', lock.name);
+    } else {
+      commitStamp(x, y, 'mark');
+    }
+    return;
+  }
   // Queue the stamp; only re-trigger if currently idle
   // (prevents broken animation from rapid clicks)
   if (stampHead.phase === PHASE_IDLE) {
-    const reach = checkReach(x, y);
-    stampHead.phase = PHASE_PRESS;
+    // Locked on a live node: the stamp goes on the port, not under
+    // the pointer, and is labelled with the node it routed to.
+    let kind = 'mark', label = '', toolAngle = null;
+    if (lock.el && !lock.offline) {
+      const port = portPoint(lock.el);
+      x = port.x; y = port.y;
+      kind = 'route';
+      label = lock.name;
+      toolAngle = dockToolAngle();
+    }
+    const reach = checkReach(x, y, toolAngle);
+    // The arm first travels to the job (APPROACH) and only presses
+    // once the motors have arrived - with real joint speeds a click
+    // right after a flick would otherwise print before the head is
+    // anywhere near the point.
+    stampHead.phase = PHASE_APPROACH;
     stampHead.phaseStart = performance.now();
+    stampHead.job = { x, y, toolAngle };
     // Store both target intent and reachability flag.
     // If unreachable, actual stamp coords will be resolved
     // at commit time from current EE position.
-    stampHead.pendingStamp = { x, y, reachable: reach.reachable };
+    stampHead.pendingStamp = { x, y, reachable: reach.reachable, kind, label };
     stampHead.wasOutOfReach = !reach.reachable;
   }
 }
@@ -573,7 +1111,19 @@ function updateStampHead(now) {
   const dur = PHASE_DURATIONS[stampHead.phase];
   const t = Math.min(elapsed / dur, 1);
 
-  if (stampHead.phase === PHASE_PRESS) {
+  if (stampHead.phase === PHASE_APPROACH) {
+    // Arrived = motors quiet and the effector on the job point (or as
+    // close as the workspace allows). The timeout is a safety net.
+    const pts = forwardKinematics();
+    const ee = pts[pts.length - 1];
+    const job = stampHead.job;
+    const closeEnough = Math.hypot(job.x - ee.x, job.y - ee.y) < 6 || !stampHead.pendingStamp.reachable;
+    const quiet = motorState.maxErr < 0.012 && motorState.maxVel < 0.25;
+    if ((quiet && closeEnough) || t >= 1) {
+      stampHead.phase = PHASE_PRESS;
+      stampHead.phaseStart = now;
+    }
+  } else if (stampHead.phase === PHASE_PRESS) {
     // Ease-in cubic - piston accelerates downward
     stampHead.pistonExtension = t * t;
     if (t >= 1) {
@@ -591,16 +1141,17 @@ function updateStampHead(now) {
       //   (the IK solver pushes the arm as far toward the target
       //   as the kinematic chain allows, then stops)
       let stampX, stampY;
-      if (stampHead.pendingStamp.reachable) {
-        stampX = stampHead.pendingStamp.x;
-        stampY = stampHead.pendingStamp.y;
+      const pending = stampHead.pendingStamp;
+      if (pending.reachable) {
+        stampX = pending.x;
+        stampY = pending.y;
       } else {
         const pts = forwardKinematics();
         const ee = pts[pts.length - 1];
         stampX = ee.x;
         stampY = ee.y;
       }
-      commitStamp(stampX, stampY, !stampHead.pendingStamp.reachable);
+      commitStamp(stampX, stampY, pending.reachable ? pending.kind : 'limit', pending.label);
       stampHead.pendingStamp = null;
     }
     if (t >= 1) {
@@ -614,6 +1165,7 @@ function updateStampHead(now) {
     if (t >= 1) {
       stampHead.phase = PHASE_IDLE;
       stampHead.pistonExtension = 0;
+      stampHead.job = null;
     }
   }
 }
@@ -625,13 +1177,17 @@ const MAX_STAMPS = 30;
 const STAMP_LIFETIME = 3500; // ms
 const stamps = [];
 
-function commitStamp(x, y, wasUnreachable = false) {
+// kind: 'mark'  - free click, orange
+//       'limit' - target was out of reach, amber, stamped at the EE
+//       'route' - stamped on a node's port, green, label = node name
+function commitStamp(x, y, kind = 'mark', label = '') {
   const stamp = {
     x, y,
     born: performance.now(),
-    rotation: (Math.random() - 0.5) * 0.4, // slight random tilt
+    rotation: (Math.random() - 0.5) * (kind === 'route' ? 0.15 : 0.4), // routed seals sit straighter
     id: stampCounter++,
-    wasUnreachable // flag for distinct visual styling
+    kind,
+    label
   };
   stamps.push(stamp);
   if (stamps.length > MAX_STAMPS) stamps.shift();
@@ -656,14 +1212,23 @@ function drawStamps(now) {
     ctx.rotate(s.rotation);
     ctx.globalAlpha = fade;
 
-    // Color scheme differs for unreachable stamps:
-    // - reachable: orange (normal stamp at clicked location)
-    // - unreachable: yellow/amber (stamp at arm's reach limit)
-    const mainColor = s.wasUnreachable ? '#ffb800' : '#ff6a00';
-    const accentColor = s.wasUnreachable ? '#ff3a00' : '#ffb800';
-    const fillRGBA = s.wasUnreachable
-      ? 'rgba(255, 184, 0, 0.15)'
-      : 'rgba(255, 106, 0, 0.15)';
+    // Palette per kind:
+    // - mark:  orange (free click at the pointer)
+    // - limit: amber  (target out of reach, stamped at the EE)
+    // - route: green  (sealed on a node's port)
+    const isLimit = s.kind === 'limit';
+    const isRoute = s.kind === 'route';
+    const mainColor = isRoute ? '#00ff66' : isLimit ? '#ffb800' : '#ff6a00';
+    const accentColor = isRoute ? '#b6ffd2' : isLimit ? '#ff3a00' : '#ffb800';
+    const fillRGBA = isRoute ? 'rgba(0, 255, 102, 0.12)'
+                   : isLimit ? 'rgba(255, 184, 0, 0.15)'
+                   : 'rgba(255, 106, 0, 0.15)';
+    // Routed seals sit on a row's left edge, so their labels go on the
+    // free side (left); everything else labels to the right. On phones
+    // the left side is the screen edge, so routed labels go underneath,
+    // right-aligned to the seal.
+    const below = isRoute && isMobile();
+    const side = isRoute ? -1 : 1;
 
     // Outer hexagonal stamp boundary
     const r = 22;
@@ -700,30 +1265,36 @@ function drawStamps(now) {
     ctx.fill();
 
     // ID label
-    ctx.fillStyle = s.wasUnreachable
-      ? 'rgba(255, 184, 0, 0.85)'
-      : 'rgba(255, 106, 0, 0.8)';
+    ctx.fillStyle = isRoute ? 'rgba(0, 255, 102, 0.85)'
+                  : isLimit ? 'rgba(255, 184, 0, 0.85)'
+                  : 'rgba(255, 106, 0, 0.8)';
     ctx.font = '8px JetBrains Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`#${String(s.id).padStart(3, '0')}`, r + 4, 3);
+    ctx.textAlign = below ? 'right' : side > 0 ? 'left' : 'right';
+    const lx = below ? r : side * (r + 4);
+    const ly = below ? r + 14 : 3;
+    ctx.fillText(`#${String(s.id).padStart(3, '0')}`, lx, ly);
 
     // Timestamp + status label
     ctx.fillStyle = 'rgba(136, 130, 120, 0.7)';
     ctx.font = '7px JetBrains Mono, monospace';
     const ms = Math.floor((now - s.born));
-    ctx.fillText(`T+${String(ms).padStart(4, '0')}ms`, r + 4, 13);
+    ctx.fillText(`T+${String(ms).padStart(4, '0')}ms`, lx, ly + 10);
 
-    // Extra label for unreachable stamps
-    if (s.wasUnreachable) {
+    // Third line: LIMIT for out-of-reach, ROUTED // NODE for seals
+    if (isLimit) {
       ctx.fillStyle = 'rgba(255, 58, 0, 0.85)';
       ctx.font = '7px JetBrains Mono, monospace';
-      ctx.fillText('LIMIT', r + 4, 23);
+      ctx.fillText('LIMIT', lx, ly + 20);
+    } else if (isRoute) {
+      ctx.fillStyle = 'rgba(0, 255, 102, 0.85)';
+      ctx.font = '7px JetBrains Mono, monospace';
+      ctx.fillText(`ROUTED // ${s.label}`, lx, ly + 20);
     }
 
     // Subtle dashed accent ring
-    ctx.strokeStyle = s.wasUnreachable
-      ? 'rgba(255, 184, 0, 0.4)'
-      : 'rgba(255, 106, 0, 0.35)';
+    ctx.strokeStyle = isRoute ? 'rgba(0, 255, 102, 0.4)'
+                    : isLimit ? 'rgba(255, 184, 0, 0.4)'
+                    : 'rgba(255, 106, 0, 0.35)';
     ctx.lineWidth = 0.8;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -738,49 +1309,174 @@ function drawStamps(now) {
 /* ============================================================
    IK
    ============================================================ */
-function forwardKinematics() {
+// Joint positions for a set of relative joint angles; pts[0] is the
+// base, pts[4] the end-effector. Defaults to the drawn (motor) state.
+function forwardKinematics(joints = q) {
   const base = getBase();
   const pts = [{ x: base.x, y: base.y }];
-  let x = base.x, y = base.y;
-  for (let i = 0; i < angles.length; i++) {
-    x += Math.cos(angles[i]) * armLengths[i];
-    y += Math.sin(angles[i]) * armLengths[i];
+  let x = base.x, y = base.y, a = 0;
+  for (let i = 0; i < joints.length; i++) {
+    a += joints[i];
+    x += Math.cos(a) * armLengths[i];
+    y += Math.sin(a) * armLengths[i];
     pts.push({ x, y });
   }
   return pts;
 }
 
-function solveIK(targetX, targetY) {
-  const iterations = 8;
-  for (let iter = 0; iter < iterations; iter++) {
-    for (let i = angles.length - 1; i >= 0; i--) {
-      const pts = forwardKinematics();
-      const ee = pts[pts.length - 1];
-      const joint = pts[i];
+/* ----------------------------------------------------------
+   Goal solve - analytic, the way a real controller does it
+   Writes the solution into goalQ; the motors do the moving.
 
-      const angToEE = Math.atan2(ee.y - joint.y, ee.x - joint.x);
-      const angToTarget = Math.atan2(targetY - joint.y, targetX - joint.x);
-      let delta = angToTarget - angToEE;
-      while (delta > Math.PI) delta -= 2 * Math.PI;
-      while (delta < -Math.PI) delta += 2 * Math.PI;
-      delta *= 0.25;
+   1. Tool: pointed at toolAngle if given (docking), otherwise from
+      the SHOULDER (top of an upright base link) toward the target.
+   2. Wrist centre = target - L4 along the tool.
+   3. Forearm: from the shoulder toward the wrist centre. Elbow point
+      = wrist - L3 along the forearm. Measuring from the shoulder
+      rather than the base is what makes the arm come down from above
+      on targets near the floor instead of trying to fold under itself.
+   4. Upper arm + arm (L1, L2) reach the elbow point with the closed-
+      form two-link solution; of the two mirror solutions the one
+      that respects the joint ranges with the least wrist bend wins.
+   Steps 1-3 resolve the redundancy of a 4-link planar chain with a
+   posture rule instead of an iterative search, so the pose for a
+   given target is always the same, never jitters and never folds.
+   Joint ranges are applied last; when the elbow point is outside the
+   two-link ring the arm stretches/folds toward it and the residual
+   shows up as an out-of-reach stamp.
 
-      for (let j = i; j < angles.length; j++) angles[j] += delta;
+   Returns the remaining distance (px) between EE and target.
+   ---------------------------------------------------------- */
+function posture(targetX, targetY, toolAngle) {
+  const base = getBase();
+  const L = armLengths;
+  const shoulderX = base.x, shoulderY = base.y - L[0];
+  const tool = toolAngle === null
+    ? Math.atan2(targetY - shoulderY, targetX - shoulderX)
+    : toolAngle;
+  const wristX = targetX - Math.cos(tool) * L[3];
+  const wristY = targetY - Math.sin(tool) * L[3];
+  const fore = Math.atan2(wristY - shoulderY, wristX - shoulderX);
+  const elbowX = wristX - Math.cos(fore) * L[2];
+  const elbowY = wristY - Math.sin(fore) * L[2];
+  return { base, tool, fore, elbowX, elbowY };
+}
 
-      if (i === 0) {
-        const minA = -Math.PI + 0.15;
-        const maxA = -0.15;
-        if (angles[0] < minA) {
-          const diff = minA - angles[0];
-          for (let j = 0; j < angles.length; j++) angles[j] += diff;
-        }
-        if (angles[0] > maxA) {
-          const diff = maxA - angles[0];
-          for (let j = 0; j < angles.length; j++) angles[j] += diff;
-        }
-      }
+// Two-link ring the elbow point must fall in: outer = stretched,
+// inner = elbow folded to its joint limit.
+function twoLinkRing() {
+  const L = armLengths;
+  const outer = L[0] + L[1] - 0.5;
+  const inner = Math.sqrt(L[0] * L[0] + L[1] * L[1] + 2 * L[0] * L[1] * Math.cos(JOINT_MAX[1])) + 0.5;
+  return { outer, inner };
+}
+
+function solveGoal(targetX, targetY, toolAngle = null) {
+  const L = armLengths;
+  const { base, tool, fore, elbowX, elbowY } = posture(targetX, targetY, toolAngle);
+  const ring = twoLinkRing();
+
+  // Two-link IK (L1, L2) from the base to the elbow point
+  const ex = elbowX - base.x, ey = elbowY - base.y;
+  const r = Math.hypot(ex, ey);
+  const rc = Math.min(ring.outer, Math.max(ring.inner, r));
+  const cosQ1 = (rc * rc - L[0] * L[0] - L[1] * L[1]) / (2 * L[0] * L[1]);
+  const q1mag = Math.acos(Math.max(-1, Math.min(1, cosQ1)));
+  const heading = Math.atan2(ey, ex);
+
+  // Candidate elbow angles: +q1 bends clockwise on screen, -q1 counter-
+  // clockwise. Score each mirror solution by how badly it violates the
+  // joint ranges, then by how much the wrist has to bend; the arm
+  // takes the pose that "flows" into the forearm direction.
+  let best = null;
+  for (const q1 of [q1mag, -q1mag]) {
+    const q0 = wrapPI(heading - Math.atan2(L[1] * Math.sin(q1), L[0] + L[1] * Math.cos(q1)));
+    const q2 = wrapPI(fore - (q0 + q1));
+    const violation =
+      Math.max(0, JOINT_MIN[0] - q0, q0 - JOINT_MAX[0]) +
+      Math.max(0, Math.abs(q2) - JOINT_MAX[2]);
+    let score = violation * 10 + Math.abs(q2);
+    if (isMobile()) {
+      // In the rail a folded elbow has to stick out somewhere: prefer
+      // the screen edge (left) over the panel (right), so the text
+      // stays readable and the arm reads as reaching in from outside.
+      const elbowJointX = base.x + Math.cos(q0) * L[0];
+      score += Math.max(0, elbowJointX - (base.x + 30)) / 60;
+    }
+    if (!best || score < best.score) best = { q0, q1, score };
+  }
+
+  goalQ[0] = Math.min(JOINT_MAX[0], Math.max(JOINT_MIN[0], best.q0));
+  goalQ[1] = Math.min(JOINT_MAX[1], Math.max(JOINT_MIN[1], best.q1));
+  goalQ[2] = Math.min(JOINT_MAX[2], Math.max(JOINT_MIN[2], wrapPI(fore - (goalQ[0] + goalQ[1]))));
+  goalQ[3] = Math.min(JOINT_MAX[3], Math.max(JOINT_MIN[3], wrapPI(tool - fore)));
+
+  const pts = forwardKinematics(goalQ);
+  const ee = pts[pts.length - 1];
+  return Math.hypot(targetX - ee.x, targetY - ee.y);
+}
+
+/* ----------------------------------------------------------
+   Motors - trapezoidal velocity profile per joint
+   Each joint accelerates at aMax toward vMax, cruises, and follows
+   the deceleration curve v = sqrt(2 * aMax * d) into the goal, with
+   a proportional zone at the end so it lands without chatter. Big
+   moves therefore take time and fast pointer flicks leave the arm
+   visibly behind - it has to catch up like a machine, not a cursor.
+   Returns the largest remaining error / velocity for settle checks.
+   ---------------------------------------------------------- */
+const motorState = { maxErr: 0, maxVel: 0 };
+const settle = [0, 0, 0, 0].map(() => ({ t0: -1e9, amp: 0, peak: 0 }));
+const SETTLE_TAU = 140, SETTLE_HZ = 8;
+
+function updateMotors(dt, now) {
+  let maxErr = 0, maxVel = 0;
+  for (let i = 0; i < q.length; i++) {
+    const m = MOTORS[i];
+    // No angle wrapping here: goals are clamped to the joint range and
+    // the motor must travel inside it, never "the short way round".
+    const err = goalQ[i] - q[i];
+    const dist = Math.abs(err);
+    // Desired speed at this distance: deceleration curve, capped, with
+    // a linear finish inside the last ~4 degrees.
+    let vDes = Math.min(Math.sqrt(2 * m.aMax * dist), dist * 14, m.vMax) * Math.sign(err);
+    const dv = Math.max(-m.aMax * dt, Math.min(m.aMax * dt, vDes - jointVel[i]));
+    jointVel[i] += dv;
+    let step = jointVel[i] * dt;
+    if (Math.abs(step) >= dist) { step = err; jointVel[i] *= 0.5; }
+    q[i] += step;
+
+    // Servo settle: remember the fastest this joint went since it last
+    // stopped; when it stops after a real move, ring briefly with an
+    // amplitude proportional to that speed.
+    const s = settle[i];
+    s.peak = Math.max(s.peak, Math.abs(jointVel[i]));
+    if (dist < 0.01 && Math.abs(jointVel[i]) < 0.05 && s.peak > 0.4) {
+      s.amp = Math.min(0.012, 0.0035 * s.peak);   // up to ~0.7 deg
+      s.t0 = now;
+      s.peak = 0;
+    }
+    maxErr = Math.max(maxErr, dist);
+    maxVel = Math.max(maxVel, Math.abs(jointVel[i]));
+  }
+  motorState.maxErr = maxErr;
+  motorState.maxVel = maxVel;
+}
+
+// Joint angles as drawn: motor state plus the decaying settle ring.
+function drawnJoints(now) {
+  const out = q.slice();
+  for (let i = 0; i < out.length; i++) {
+    const s = settle[i];
+    const age = now - s.t0;
+    if (age < SETTLE_TAU * 6) {
+      out[i] += s.amp * Math.exp(-age / SETTLE_TAU) * Math.sin(age / 1000 * SETTLE_HZ * Math.PI * 2);
     }
   }
+  return out;
+}
+function settleActive(now) {
+  return settle.some(s => now - s.t0 < SETTLE_TAU * 6);
 }
 
 /* ============================================================
@@ -1113,9 +1809,12 @@ function drawImpactWave(x, y, intensity) {
 const eePosEl = document.getElementById('eePos');
 const gripStateEl = document.getElementById('gripState');
 const stampCountEl = document.getElementById('stampCount');
+const sysStateEl = document.getElementById('sysState');
+const sysDotEl = document.getElementById('sysDot');
 
 const PHASE_NAMES = {
   [PHASE_IDLE]: 'IDLE',
+  [PHASE_APPROACH]: 'APPROACH',
   [PHASE_PRESS]: 'PRESS',
   [PHASE_PRINT]: 'PRINT',
   [PHASE_RETRACT]: 'RETRACT'
@@ -1123,11 +1822,27 @@ const PHASE_NAMES = {
 
 function render(now) {
   if (!now) now = performance.now();
+  frameMs = lastFrameAt ? now - lastFrameAt : 0;
+  lastFrameAt = now;
 
   updateStampHead(now);
   // Arm always tracks the pointer (mouse on desktop, last touch
-  // point on mobile) - same behaviour on every platform.
-  solveIK(mouse.x, mouse.y);
+  // point on mobile) - same behaviour on every platform - unless the
+  // user asked for reduced motion, in which case it holds a park pose.
+  const target = currentTarget();
+  if (target.pose) {
+    for (let i = 0; i < q.length; i++) goalQ[i] = target.pose[i];
+  } else {
+    solveGoal(target.x, target.y, target.toolAngle);
+  }
+  if (reduceMotion.matches) {
+    // No dynamics: joints snap to the solution.
+    for (let i = 0; i < q.length; i++) { q[i] = goalQ[i]; jointVel[i] = 0; }
+    motorState.maxErr = 0; motorState.maxVel = 0;
+  } else {
+    updateMotors(Math.min(frameMs, 50) / 1000, now);
+  }
+  armSettled = motorState.maxErr < 0.002 && motorState.maxVel < 0.02 && !settleActive(now);
 
   ctx.clearRect(0, 0, W, H);
 
@@ -1143,8 +1858,9 @@ function render(now) {
     }
   }
 
-  // Layer 3: arm
-  const pts = forwardKinematics();
+  // Layer 3: arm (ghosted under the diagnostics overlay)
+  const pts = forwardKinematics(drawnJoints(now));
+  if (diag) ctx.globalAlpha = 0.35;
   drawBase();
 
   const thicknesses = [34, 26, 20, 14];
@@ -1162,16 +1878,60 @@ function render(now) {
   const wrist = pts[pts.length - 2];
   const eeAngle = Math.atan2(ee.y - wrist.y, ee.x - wrist.x);
   drawStampHead(ee.x, ee.y, eeAngle, stampHead.pistonExtension);
+  ctx.globalAlpha = 1;
 
-  // Layer 5: target crosshair at mouse - live reachability indicator
-  const liveReach = checkReach(mouse.x, mouse.y);
+  // Layer 4b: diagnostics overlay
+  if (diag) drawDiagnostics(pts, target, now);
+
+  // Layer 5a: port marker while locked - a slowly rotating dashed ring
+  // on the node's port so the dock point is visible even before the
+  // arm arrives. Red and static when the node is offline.
+  if (lock.el && !reduceMotion.matches) {
+    const port = portPoint(lock.el);
+    ctx.save();
+    ctx.translate(port.x, port.y);
+    if (lock.offline) {
+      ctx.strokeStyle = 'rgba(255, 58, 0, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-5, -5); ctx.lineTo(5, 5);
+      ctx.moveTo(5, -5); ctx.lineTo(-5, 5);
+      ctx.stroke();
+    } else {
+      ctx.rotate(now / 900);
+      ctx.strokeStyle = 'rgba(0, 255, 102, 0.75)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#00ff66';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Layer 5b: target crosshair at mouse - live reachability indicator
+  // (always "reachable" under reduced motion: the arm isn't tracking,
+  // and the stamp lands wherever the user clicks; while locked the
+  // reach that matters is the port's, not the pointer's)
+  const liveReach = reduceMotion.matches ? { reachable: true }
+                  : checkReach(target.x, target.y, target.toolAngle);
+  // Touch devices have no pointer: only draw the reticle under a finger.
+  const showReticle = hoverCapable || touch.active;
+  if (showReticle) {
   ctx.save();
   ctx.translate(mouse.x, mouse.y);
   // Color logic:
   // - during animation: amber (active)
+  // - locked on a live node: green / on an offline node: red
   // - hovering reachable point: orange
   // - hovering unreachable point: red (warning)
   const ringColor = stampHead.phase !== PHASE_IDLE ? '#ffb800'
+                  : lock.el ? (lock.offline ? '#ff3a00' : '#00ff66')
                   : (liveReach.reachable ? '#ff6a00' : '#ff3a00');
   ctx.strokeStyle = ringColor;
   ctx.fillStyle = ringColor;
@@ -1198,14 +1958,15 @@ function render(now) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Warning label below crosshair when out of reach
-  if (!liveReach.reachable && stampHead.phase === PHASE_IDLE) {
-    ctx.fillStyle = '#ff3a00';
+  // Label below crosshair: reach warning, or the lock state
+  if (stampHead.phase === PHASE_IDLE && (lock.el || !liveReach.reachable)) {
+    ctx.fillStyle = ringColor;
     ctx.font = '8px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('OUT OF REACH', 0, 34);
+    ctx.fillText(lock.el ? (lock.offline ? 'NO ROUTE' : 'LOCKED') : 'OUT OF REACH', 0, 34);
   }
   ctx.restore();
+  }
 
   // HUD telemetry
   eePosEl.textContent = `${String(Math.round(ee.x)).padStart(3, '0')}, ${String(Math.round(ee.y)).padStart(3, '0')}`;
@@ -1214,10 +1975,41 @@ function render(now) {
                           : stampHead.phase === PHASE_IDLE ? '#ffb800' : '#ff9540';
   stampCountEl.textContent = String(stampCounter).padStart(3, '0');
 
-  requestAnimationFrame(render);
+  // Keep going only while something can still change (see Render
+  // scheduling above); otherwise park the loop until the next input.
+  const busy =
+    stampHead.phase !== PHASE_IDLE ||
+    stamps.length > 0 ||
+    stampHead.pistonExtension > 0.01 ||
+    stampHead.pressureRing > 0.05 ||
+    !armSettled ||
+    (hoverCapable && lock.el && !lock.offline) ||   // port ring keeps rotating
+    (now - lastInput) < SETTLE_MS;
+
+  if (busy) {
+    if (sysStateEl.textContent !== 'ONLINE') {
+      sysStateEl.textContent = 'ONLINE';
+      sysDotEl.classList.remove('standby');
+    }
+    requestAnimationFrame(render);
+  } else {
+    loopActive = false;
+    lastFrameAt = 0;   // next wake starts a fresh frame-time measurement
+    sysStateEl.textContent = 'STANDBY';
+    sysDotEl.classList.add('standby');
+    if (diag) diagTextEl.textContent = diagTextEl.textContent.replace('LOOP     ONLINE ', 'LOOP     STANDBY');
+  }
 }
 
-render();
+computeLengths();
+// Web fonts reflow the panel; re-fit the arm once they're in.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => { computeLengths(); wake(); });
+}
+if (!hoverCapable) {
+  document.querySelector('.subtitle').textContent = '\u2014 TAP to mark \u00b7 tap a node to connect \u2014';
+}
+wake();
 </script>
 </body>
 </html>
