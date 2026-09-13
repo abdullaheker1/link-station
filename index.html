@@ -219,6 +219,24 @@
   .link:hover::before { transform: scaleY(1); }
   .link:active { transform: translateX(4px) scale(0.98); }
 
+  /* Keyboard navigation: Tab moves between nodes; the focused node
+     gets the same treatment as hover plus a visible outline. */
+  .link:focus-visible {
+    outline: 2px solid var(--kuka-yellow);
+    outline-offset: 2px;
+    background: rgba(255, 106, 0, 0.1);
+    border-color: var(--kuka-orange);
+  }
+  .link:focus-visible::before { transform: scaleY(1); }
+
+  /* Reduced motion: no pulsing LED, no hover slides. The arm itself
+     is handled in the script (parks and stops tracking the pointer). */
+  @media (prefers-reduced-motion: reduce) {
+    .dot { animation: none; }
+    .link, .link::before, .link-arrow { transition: none; }
+    .link:hover, .link:active { transform: none; }
+  }
+
   .link-icon {
     width: 22px; height: 22px;
     flex-shrink: 0;
@@ -332,22 +350,22 @@
 </head>
 <body>
 
-<canvas id="robotCanvas"></canvas>
+<canvas id="robotCanvas" aria-hidden="true"></canvas>
 
-<div class="hud hud-tl">
+<div class="hud hud-tl" aria-hidden="true">
   <div><span class="label">SYS:</span> <span class="val">KR-4DOF</span></div>
   <div><span class="label">MODE:</span> STAMP-IK</div>
   <div><span class="label">EE:</span> <span id="eePos">000, 000</span></div>
 </div>
 
-<div class="hud hud-tr">
+<div class="hud hud-tr" aria-hidden="true">
   <div><span class="dot"></span><span class="val">ONLINE</span></div>
   <div><span class="label">HEAD:</span> <span id="gripState" class="val">IDLE</span></div>
   <div><span class="label">STAMPS:</span> <span id="stampCount" class="val">000</span></div>
 </div>
 
-<div class="hud hud-bl">// LINK_STATION_v2.6 // EST.2026</div>
-<div class="hud hud-br">SHEKERFND // ASABEES</div>
+<div class="hud hud-bl" aria-hidden="true">// LINK_STATION_v2.6 // EST.2026</div>
+<div class="hud hud-br" aria-hidden="true">SHEKERFND // ASABEES</div>
 
 <div class="container">
   <div class="header">
@@ -464,6 +482,15 @@ resize();
 
 const mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
+// prefers-reduced-motion: the arm parks beside the panel instead of
+// sweeping after the pointer, and clicks stamp instantly (no piston
+// animation). Fades and the reticle are left as-is; they don't move.
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+function getParkTarget() {
+  const base = getBase();
+  return { x: base.x + W * 0.14, y: H * 0.48 };
+}
+
 // Debounced resize: mobile browsers fire resize constantly as
 // the URL bar shows/hides. Debounce avoids thrashing the
 // kinematics. orientationchange is explicit for older browsers
@@ -575,6 +602,11 @@ const PHASE_DURATIONS = {
 };
 
 function triggerStamp(x, y) {
+  if (reduceMotion.matches) {
+    // No press cycle: the mark simply appears where the user clicked.
+    commitStamp(x, y, false);
+    return;
+  }
   // Queue the stamp; only re-trigger if currently idle
   // (prevents broken animation from rapid clicks)
   if (stampHead.phase === PHASE_IDLE) {
@@ -1153,8 +1185,14 @@ function render(now) {
 
   updateStampHead(now);
   // Arm always tracks the pointer (mouse on desktop, last touch
-  // point on mobile) - same behaviour on every platform.
-  solveIK(mouse.x, mouse.y);
+  // point on mobile) - same behaviour on every platform - unless the
+  // user asked for reduced motion, in which case it holds a park pose.
+  if (reduceMotion.matches) {
+    const park = getParkTarget();
+    solveIK(park.x, park.y);
+  } else {
+    solveIK(mouse.x, mouse.y);
+  }
 
   ctx.clearRect(0, 0, W, H);
 
@@ -1191,7 +1229,9 @@ function render(now) {
   drawStampHead(ee.x, ee.y, eeAngle, stampHead.pistonExtension);
 
   // Layer 5: target crosshair at mouse - live reachability indicator
-  const liveReach = checkReach(mouse.x, mouse.y);
+  // (always "reachable" under reduced motion: the arm isn't tracking,
+  // and the stamp lands wherever the user clicks)
+  const liveReach = reduceMotion.matches ? { reachable: true } : checkReach(mouse.x, mouse.y);
   ctx.save();
   ctx.translate(mouse.x, mouse.y);
   // Color logic:
