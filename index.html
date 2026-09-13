@@ -29,6 +29,17 @@
     cursor: crosshair;
   }
 
+  /* On mouse/trackpad devices the canvas draws the reticle itself,
+     so the native cursor is hidden to avoid a double crosshair.
+     Touch devices have no cursor; the rule is a no-op there.
+     If the canvas loop ever dies (see window 'error' handler in the
+     script) the html.no-canvas class restores the native cursor. */
+  @media (pointer: fine) and (hover: hover) {
+    html:not(.no-canvas), html:not(.no-canvas) body, html:not(.no-canvas) .link {
+      cursor: none;
+    }
+  }
+
   body::before {
     content: '';
     position: fixed; inset: 0;
@@ -187,7 +198,6 @@
     font-weight: 500;
     transition: all 0.2s ease;
     position: relative;
-    cursor: pointer;
   }
   .link:last-of-type { margin-bottom: 0; }
 
@@ -263,6 +273,18 @@
        touch point. Only the HUD is simplified.
      ============================================================ */
   @media (max-width: 768px) {
+    /* The page is allowed to scroll on phones. With overflow:hidden
+       the bottom links were unreachable on short viewports
+       (<= ~570px, e.g. iPhone SE). 100dvh tracks the *dynamic*
+       viewport, so the collapsing URL bar no longer changes the
+       layout height. The canvas is position:fixed and unaffected. */
+    html, body {
+      height: auto;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
     /* Hide all corner telemetry - only the OPERATOR tag in the
        header remains (it lives inside flow, never overlaps) */
     .hud-tl, .hud-tr, .hud-bl, .hud-br {
@@ -277,9 +299,10 @@
     .container {
       padding: 16px;
       justify-content: flex-start;
-      padding-top: 8vh;
+      padding-top: 6vh;
+      padding-bottom: 32px;
       height: auto;
-      min-height: 100vh;
+      min-height: 100dvh;
     }
 
     .title {
@@ -418,6 +441,10 @@
    Stamp pool: ring buffer, max 30 active. Each stamp fades
    over ~3.5s with cubic ease-out, then is recycled.
    ============================================================ */
+
+// Safety net for the hidden native cursor (see CSS): any uncaught
+// error in this script restores it so the page stays usable.
+window.addEventListener('error', () => document.documentElement.classList.add('no-canvas'));
 
 const canvas = document.getElementById('robotCanvas');
 const ctx = canvas.getContext('2d');
