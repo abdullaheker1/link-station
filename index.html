@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>shekerFND // LINK STATION</title>
-<meta name="description" content="shekerFND link station — Instagram, YouTube, GitHub, e-posta. İmleci takip eden 4 eksenli bir robot kol eşliğinde." />
+<title>apollon // LINK STATION</title>
+<meta name="description" content="apollon link station — Instagram, YouTube, GitHub, e-posta. İmleci takip eden 4 eksenli bir robot kol eşliğinde." />
 <meta name="theme-color" content="#0a0908" />
 <link rel="canonical" href="https://abdullaheker1.github.io/link-station/" />
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
@@ -12,8 +12,8 @@
 
 <!-- Link previews (Instagram/WhatsApp/X/Discord read these) -->
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="shekerFND" />
-<meta property="og:title" content="shekerFND // LINK STATION" />
+<meta property="og:site_name" content="apollon" />
+<meta property="og:title" content="apollon // LINK STATION" />
 <meta property="og:description" content="Instagram, YouTube, GitHub, e-posta — imleci takip eden 4 eksenli bir robot kol eşliğinde." />
 <meta property="og:url" content="https://abdullaheker1.github.io/link-station/" />
 <meta property="og:image" content="https://abdullaheker1.github.io/link-station/assets/og.png" />
@@ -22,7 +22,7 @@
 <meta property="og:image:alt" content="LINK::STATION — turuncu endüstriyel robot kol, bağlantı panelindeki bir düğüme damga basıyor" />
 <meta property="og:locale" content="tr_TR" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="shekerFND // LINK STATION" />
+<meta name="twitter:title" content="apollon // LINK STATION" />
 <meta name="twitter:description" content="Instagram, YouTube, GitHub, e-posta — imleci takip eden 4 eksenli bir robot kol eşliğinde." />
 <meta name="twitter:image" content="https://abdullaheker1.github.io/link-station/assets/og.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -41,9 +41,14 @@
 
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-  html, body {
+  html {
     height: 100%;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;      /* the window scrolls only when the content is taller than it */
+  }
+  body {
+    min-height: 100%;
+    overflow-x: hidden;
     background: var(--bg-0);
     color: var(--text);
     font-family: 'JetBrains Mono', monospace;
@@ -80,18 +85,24 @@
     z-index: 2;
   }
 
-  /* Container in middle layer */
+  /* Container in middle layer. Vertical centering is done with auto
+     margins on the header/panel rather than justify-content:center:
+     flex centering clips the top of content that is taller than the
+     viewport (short laptop windows), auto margins collapse to zero
+     and the page scrolls instead. */
   .container {
     position: relative;
     z-index: 4;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 20px;
     pointer-events: none;
   }
+  .header { margin-top: auto; }
+  .panel { margin-bottom: auto; }
 
   /* Canvas on top, but pointer-events: none so links remain clickable */
   #robotCanvas {
@@ -112,7 +123,16 @@
   .hud .val { color: var(--kuka-yellow); }
   .hud-tl { top: 24px; left: 24px; }
   .hud-tr { top: 24px; right: 24px; text-align: right; }
-  .hud-bl { bottom: 24px; left: 24px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.3em; }
+  .hud-bl {
+    bottom: 24px; left: 24px;
+    font-size: 9px; color: var(--text-dim); letter-spacing: 0.3em;
+    /* Version string in the corner, controls stacked above it: a narrow
+       column that stays clear of the panel on short/narrow windows. */
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 6px;
+  }
 
   /* Diagnostics toggle lives in the bottom-left HUD block; it is the
      one HUD element that accepts input (and stays visible on phones). */
@@ -125,7 +145,6 @@
     font-size: 9px;
     letter-spacing: 0.3em;
     padding: 4px 8px;
-    margin-left: 14px;
     transition: color 0.15s, border-color 0.15s;
   }
   .diag-toggle:hover,
@@ -413,9 +432,9 @@
     }
     /* ...except the diagnostics toggle: keep the block, drop the
        version string, enlarge the tap target */
-    .hud-bl { bottom: 16px; left: auto; right: 16px; }
+    .hud-bl { bottom: 16px; left: auto; right: 16px; align-items: flex-end; }
     .hud-bl .ver { display: none; }
-    .diag-toggle { margin-left: 0; padding: 7px 10px; font-size: 10px; }
+    .diag-toggle { padding: 7px 10px; font-size: 10px; }
 
     /* Readout becomes a bottom sheet above the toggle */
     .diag-panel {
@@ -443,6 +462,8 @@
       height: auto;
       min-height: 100dvh;
     }
+    .header { margin-top: 0; }
+    .panel { margin-bottom: 0; }
 
     .title {
       font-size: clamp(28px, 9vw, 42px);
@@ -467,6 +488,20 @@
     .title { font-size: clamp(24px, 8vw, 34px); }
     .panel { padding: 13px; }
   }
+
+  /* Short desktop windows (laptops with the browser not maximised):
+     tighten the vertical rhythm so header + six nodes fit in ~600px. */
+  @media (min-width: 769px) and (max-height: 720px) {
+    .container { padding: 12px; }
+    .id-tag { margin-bottom: 8px; font-size: 9px; }
+    .title { font-size: clamp(28px, 4vw, 40px); }
+    .header { margin-bottom: 16px; }
+    .panel { padding: 16px; }
+    .panel-header { margin-bottom: 12px; padding-bottom: 8px; }
+    .link { padding: 9px 12px; }
+    .node-list li + li { margin-top: 6px; }
+    .stripe { margin-top: 12px; height: 6px; }
+  }
 </style>
 </head>
 <body>
@@ -488,11 +523,11 @@
 
 
 <div class="diag-panel" id="diagPanel" hidden aria-hidden="true"><pre id="diagText"></pre></div>
-<div class="hud hud-br" aria-hidden="true">SHEKERFND // ASABEES</div>
+<div class="hud hud-br" aria-hidden="true">APOLLON // ASABEES</div>
 
 <div class="container">
   <div class="header">
-    <div class="id-tag">// OPERATOR: SHEKERFND</div>
+    <div class="id-tag">// OPERATOR: APOLLON</div>
     <h1 class="title">LINK<span>::</span>STATION</h1>
     <div class="subtitle">— CLICK to mark · select node to connect —</div>
   </div>
@@ -515,7 +550,7 @@
 
 <!-- After the panel in DOM order so Tab reaches the nodes first -->
 <div class="hud hud-bl">
-  <span class="ver" aria-hidden="true">// LINK_STATION_v3.1.1 // EST.2026</span>
+  <span class="ver" aria-hidden="true">// LINK_STATION_v3.1.2 // EST.2026</span>
   <button class="diag-toggle" id="diagBtn" type="button" aria-pressed="false" title="Diagnostics overlay (D)">[ DIAG: OFF ]</button>
   <button class="diag-toggle" id="motionBtn" type="button" hidden title="Your system asks for reduced motion; override it for this page">[ MOTION: REDUCED ]</button>
 </div>
