@@ -103,6 +103,12 @@
     animation: pulse 1.5s infinite;
     vertical-align: middle;
   }
+  /* Render loop asleep (no input, nothing animating) */
+  .dot.standby {
+    background: var(--kuka-yellow);
+    box-shadow: 0 0 8px var(--kuka-yellow);
+    animation: none;
+  }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
@@ -386,7 +392,7 @@
 </div>
 
 <div class="hud hud-tr" aria-hidden="true">
-  <div><span class="dot"></span><span class="val">ONLINE</span></div>
+  <div><span class="dot" id="sysDot"></span><span class="val" id="sysState">ONLINE</span></div>
   <div><span class="label">HEAD:</span> <span id="gripState" class="val">IDLE</span></div>
   <div><span class="label">STAMPS:</span> <span id="stampCount" class="val">000</span></div>
 </div>
@@ -544,19 +550,47 @@ function getParkTarget() {
 let resizeTimer = null;
 function handleResize() {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { resize(); computeLengths(); }, 120);
+  // Setting canvas.width clears the bitmap, so a sleeping loop must be
+  // woken to repaint after the resize.
+  resizeTimer = setTimeout(() => { resize(); computeLengths(); wake(); }, 120);
 }
 window.addEventListener('resize', handleResize);
 window.addEventListener('orientationchange', handleResize);
-window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-window.addEventListener('mousedown', e => triggerStamp(e.clientX, e.clientY));
+
+/* ------------------------------------------------------------
+   Render scheduling
+   The loop only runs while something on screen can change: the
+   pointer moved recently, a press cycle is running, stamps are
+   still fading, or the arm hasn't settled on its target. Otherwise
+   it stops (no rAF, no canvas work at all) and the HUD shows
+   STANDBY. Any input wakes it. On phones this is the difference
+   between a warm pocket and an idle tab.
+   ------------------------------------------------------------ */
+const SETTLE_MS = 1200;      // keep drawing this long after the last input
+let lastInput = performance.now();
+let loopActive = false;
+let armSettled = false;      // set by solveIK each frame
+
+function wake() {
+  if (loopActive) return;
+  loopActive = true;
+  requestAnimationFrame(render);
+}
+function noteInput() {
+  lastInput = performance.now();
+  wake();
+}
+
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; noteInput(); });
+window.addEventListener('mousedown', e => { noteInput(); triggerStamp(e.clientX, e.clientY); });
 window.addEventListener('touchmove', e => {
-  if (e.touches[0]) { mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; }
+  if (e.touches[0]) { mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; noteInput(); }
 }, { passive: true });
 window.addEventListener('touchstart', e => {
   if (e.touches[0]) {
     mouse.x = e.touches[0].clientX;
     mouse.y = e.touches[0].clientY;
+    noteInput();
     triggerStamp(mouse.x, mouse.y);
   }
 }, { passive: true });
@@ -855,8 +889,11 @@ function forwardKinematics() {
   return pts;
 }
 
+// Returns the largest per-joint correction applied this call (radians),
+// which is ~0 once the arm has converged on (or stretched toward) the target.
 function solveIK(targetX, targetY) {
   const iterations = 8;
+  let maxDelta = 0;
   for (let iter = 0; iter < iterations; iter++) {
     for (let i = angles.length - 1; i >= 0; i--) {
       const pts = forwardKinematics();
@@ -869,6 +906,7 @@ function solveIK(targetX, targetY) {
       while (delta > Math.PI) delta -= 2 * Math.PI;
       while (delta < -Math.PI) delta += 2 * Math.PI;
       delta *= 0.25;
+      maxDelta = Math.max(maxDelta, Math.abs(delta));
 
       for (let j = i; j < angles.length; j++) angles[j] += delta;
 
@@ -886,6 +924,7 @@ function solveIK(targetX, targetY) {
       }
     }
   }
+  return maxDelta;
 }
 
 /* ============================================================
@@ -1218,6 +1257,8 @@ function drawImpactWave(x, y, intensity) {
 const eePosEl = document.getElementById('eePos');
 const gripStateEl = document.getElementById('gripState');
 const stampCountEl = document.getElementById('stampCount');
+const sysStateEl = document.getElementById('sysState');
+const sysDotEl = document.getElementById('sysDot');
 
 const PHASE_NAMES = {
   [PHASE_IDLE]: 'IDLE',
@@ -1233,12 +1274,14 @@ function render(now) {
   // Arm always tracks the pointer (mouse on desktop, last touch
   // point on mobile) - same behaviour on every platform - unless the
   // user asked for reduced motion, in which case it holds a park pose.
+  let ikDelta;
   if (reduceMotion.matches) {
     const park = getParkTarget();
-    solveIK(park.x, park.y);
+    ikDelta = solveIK(park.x, park.y);
   } else {
-    solveIK(mouse.x, mouse.y);
+    ikDelta = solveIK(mouse.x, mouse.y);
   }
+  armSettled = ikDelta < 1e-4;
 
   ctx.clearRect(0, 0, W, H);
 
@@ -1327,10 +1370,30 @@ function render(now) {
                           : stampHead.phase === PHASE_IDLE ? '#ffb800' : '#ff9540';
   stampCountEl.textContent = String(stampCounter).padStart(3, '0');
 
-  requestAnimationFrame(render);
+  // Keep going only while something can still change (see Render
+  // scheduling above); otherwise park the loop until the next input.
+  const busy =
+    stampHead.phase !== PHASE_IDLE ||
+    stamps.length > 0 ||
+    stampHead.pistonExtension > 0.01 ||
+    stampHead.pressureRing > 0.05 ||
+    !armSettled ||
+    (now - lastInput) < SETTLE_MS;
+
+  if (busy) {
+    if (sysStateEl.textContent !== 'ONLINE') {
+      sysStateEl.textContent = 'ONLINE';
+      sysDotEl.classList.remove('standby');
+    }
+    requestAnimationFrame(render);
+  } else {
+    loopActive = false;
+    sysStateEl.textContent = 'STANDBY';
+    sysDotEl.classList.add('standby');
+  }
 }
 
-render();
+wake();
 </script>
 </body>
 </html>
