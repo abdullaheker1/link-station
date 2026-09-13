@@ -298,11 +298,16 @@
   .link:focus-visible::before { transform: scaleY(1); }
 
   /* Reduced motion: no pulsing LED, no hover slides. The arm itself
-     is handled in the script (parks and stops tracking the pointer). */
+     is handled in the script (no pointer chasing; docking and stamp
+     jobs still move, briefly). html.motion-full = the visitor pressed
+     [ MOTION: FULL ] in the HUD, which overrides the OS preference. */
   @media (prefers-reduced-motion: reduce) {
-    .dot { animation: none; }
-    .link, .link::before, .link-arrow { transition: none; }
-    .link:hover, .link:active { transform: none; }
+    html:not(.motion-full) .dot { animation: none; }
+    html:not(.motion-full) .link,
+    html:not(.motion-full) .link::before,
+    html:not(.motion-full) .link-arrow { transition: none; }
+    html:not(.motion-full) .link:hover,
+    html:not(.motion-full) .link:active { transform: none; }
   }
 
   .link-icon {
@@ -470,7 +475,7 @@
 
 <div class="hud hud-tl" aria-hidden="true">
   <div><span class="label">SYS:</span> <span class="val">KR-4DOF</span></div>
-  <div><span class="label">MODE:</span> STAMP-IK</div>
+  <div><span class="label">MODE:</span> <span id="modeText">STAMP-IK</span></div>
   <div><span class="label">EE:</span> <span id="eePos">000, 000</span></div>
   <div><span class="label">TGT:</span> <span id="targetName">FREE</span></div>
 </div>
@@ -510,8 +515,9 @@
 
 <!-- After the panel in DOM order so Tab reaches the nodes first -->
 <div class="hud hud-bl">
-  <span class="ver" aria-hidden="true">// LINK_STATION_v3.1 // EST.2026</span>
+  <span class="ver" aria-hidden="true">// LINK_STATION_v3.1.1 // EST.2026</span>
   <button class="diag-toggle" id="diagBtn" type="button" aria-pressed="false" title="Diagnostics overlay (D)">[ DIAG: OFF ]</button>
+  <button class="diag-toggle" id="motionBtn" type="button" hidden title="Your system asks for reduced motion; override it for this page">[ MOTION: REDUCED ]</button>
 </div>
 
 <script src="icons.js"></script>
@@ -626,10 +632,25 @@ resize();
 
 const mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
-// prefers-reduced-motion: the arm parks beside the panel instead of
-// sweeping after the pointer, and clicks stamp instantly (no piston
-// animation). Fades and the reticle are left as-is; they don't move.
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+/* ------------------------------------------------------------
+   Motion policy
+   The OS can ask for reduced motion (prefers-reduced-motion). On
+   Linux/GNOME that is simply "Animations: off", on Windows "Animation
+   effects", and plenty of people have it off without meaning to say
+   anything about web pages - so it must not freeze the arm entirely.
+   Reduced = the arm does not chase the pointer (the one continuous,
+   unrequested motion); it parks, and only moves for things the
+   visitor asks for: docking on a hovered/focused node and running a
+   stamp job. Both are short and bounded by the motor limits. The HUD
+   shows the state and offers [ MOTION: FULL ], remembered per browser.
+   ------------------------------------------------------------ */
+const osReduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const MOTION_KEY = 'linkstation.motion';
+let motionFull = false;
+try { motionFull = localStorage.getItem(MOTION_KEY) === 'full'; } catch (e) { /* storage may be blocked */ }
+function reducedMotion() {
+  return osReduceMotion.matches && !motionFull;
+}
 function getParkTarget() {
   if (isMobile()) return homeTarget();
   const base = getBase();
@@ -856,9 +877,9 @@ nodeListEl.addEventListener('keydown', e => {
 // A running stamp job wins: the arm finishes what it was told to do
 // before it goes back to following the pointer.
 function currentTarget() {
-  if (reduceMotion.matches) return getParkTarget();
   if (stampHead.job) return { x: stampHead.job.x, y: stampHead.job.y, toolAngle: stampHead.job.toolAngle };
   if (lock.el && !lock.offline) return { ...portPoint(lock.el), toolAngle: dockToolAngle() };
+  if (reducedMotion()) return getParkTarget();          // no pointer chasing
   if (isMobile() && !touch.active) return homeTarget();
   return { x: mouse.x, y: mouse.y, toolAngle: null };
 }
@@ -889,6 +910,28 @@ function setDiag(on) {
   noteInput();
 }
 diagBtnEl.addEventListener('click', () => setDiag(!diag));
+
+// Motion state in the HUD. The button only appears when the OS asks
+// for reduced motion; pressing it overrides that for this page.
+const modeTextEl = document.getElementById('modeText');
+const motionBtnEl = document.getElementById('motionBtn');
+function syncMotionUI() {
+  const reduced = reducedMotion();
+  modeTextEl.textContent = reduced ? 'REDUCED-MOTION' : 'STAMP-IK';
+  modeTextEl.style.color = reduced ? '#ffb800' : '';
+  motionBtnEl.hidden = !osReduceMotion.matches;
+  motionBtnEl.textContent = `[ MOTION: ${motionFull ? 'FULL' : 'REDUCED'} ]`;
+  motionBtnEl.setAttribute('aria-pressed', String(motionFull));
+  document.documentElement.classList.toggle('motion-full', motionFull);
+}
+motionBtnEl.addEventListener('click', () => {
+  motionFull = !motionFull;
+  try { localStorage.setItem(MOTION_KEY, motionFull ? 'full' : 'auto'); } catch (e) { /* ignore */ }
+  syncMotionUI();
+  noteInput();
+});
+osReduceMotion.addEventListener('change', () => { syncMotionUI(); noteInput(); });
+syncMotionUI();
 window.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'd' || e.key === 'D') setDiag(!diag);
@@ -987,9 +1030,9 @@ function drawDiagnostics(pts, target, now) {
 
   // Readout
   const loopMs = frameMs > 0 && frameMs < 250 ? frameMs.toFixed(1).padStart(5, ' ') + ' ms' : '   -- ms';
-  const tgtLabel = reduceMotion.matches ? 'PARK'
-                 : stampHead.job ? 'JOB'
+  const tgtLabel = stampHead.job ? 'JOB'
                  : lock.el ? `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}`
+                 : reducedMotion() ? 'PARK'
                  : target.pose ? 'HOME' : 'FREE';
   const toolTxt = target.toolAngle === null ? 'free' : `tool ${Math.round(-target.toolAngle * RAD2DEG)}\u00b0`;
   const lines = [
@@ -1060,17 +1103,6 @@ const PHASE_DURATIONS = {
 };
 
 function triggerStamp(x, y) {
-  if (reduceMotion.matches) {
-    // No press cycle: the mark simply appears where the user clicked
-    // (or on the port, if a node is locked).
-    if (lock.el && !lock.offline) {
-      const port = portPoint(lock.el);
-      commitStamp(port.x, port.y, 'route', lock.name);
-    } else {
-      commitStamp(x, y, 'mark');
-    }
-    return;
-  }
   // Queue the stamp; only re-trigger if currently idle
   // (prevents broken animation from rapid clicks)
   if (stampHead.phase === PHASE_IDLE) {
@@ -1451,7 +1483,7 @@ function updateMotors(dt, now) {
     // amplitude proportional to that speed.
     const s = settle[i];
     s.peak = Math.max(s.peak, Math.abs(jointVel[i]));
-    if (dist < 0.01 && Math.abs(jointVel[i]) < 0.05 && s.peak > 0.4) {
+    if (dist < 0.01 && Math.abs(jointVel[i]) < 0.05 && s.peak > 0.4 && !reducedMotion()) {
       s.amp = Math.min(0.012, 0.0035 * s.peak);   // up to ~0.7 deg
       s.t0 = now;
       s.peak = 0;
@@ -1821,6 +1853,20 @@ const PHASE_NAMES = {
 };
 
 function render(now) {
+  try {
+    renderFrame(now);
+  } catch (err) {
+    // A throwing frame used to end the rAF chain with loopActive still
+    // true, freezing the arm for good. Surface it, hand the cursor
+    // back, and let the next input try again.
+    console.error('[link-station] render failed:', err);
+    document.documentElement.classList.add('no-canvas');
+    loopActive = false;
+    lastFrameAt = 0;
+  }
+}
+
+function renderFrame(now) {
   if (!now) now = performance.now();
   frameMs = lastFrameAt ? now - lastFrameAt : 0;
   lastFrameAt = now;
@@ -1828,20 +1874,15 @@ function render(now) {
   updateStampHead(now);
   // Arm always tracks the pointer (mouse on desktop, last touch
   // point on mobile) - same behaviour on every platform - unless the
-  // user asked for reduced motion, in which case it holds a park pose.
+  // system asks for reduced motion, in which case it parks and only
+  // moves for docking and stamp jobs (see Motion policy).
   const target = currentTarget();
   if (target.pose) {
     for (let i = 0; i < q.length; i++) goalQ[i] = target.pose[i];
   } else {
     solveGoal(target.x, target.y, target.toolAngle);
   }
-  if (reduceMotion.matches) {
-    // No dynamics: joints snap to the solution.
-    for (let i = 0; i < q.length; i++) { q[i] = goalQ[i]; jointVel[i] = 0; }
-    motorState.maxErr = 0; motorState.maxVel = 0;
-  } else {
-    updateMotors(Math.min(frameMs, 50) / 1000, now);
-  }
+  updateMotors(Math.min(frameMs, 50) / 1000, now);
   armSettled = motorState.maxErr < 0.002 && motorState.maxVel < 0.02 && !settleActive(now);
 
   ctx.clearRect(0, 0, W, H);
@@ -1886,7 +1927,7 @@ function render(now) {
   // Layer 5a: port marker while locked - a slowly rotating dashed ring
   // on the node's port so the dock point is visible even before the
   // arm arrives. Red and static when the node is offline.
-  if (lock.el && !reduceMotion.matches) {
+  if (lock.el) {
     const port = portPoint(lock.el);
     ctx.save();
     ctx.translate(port.x, port.y);
@@ -1915,11 +1956,12 @@ function render(now) {
   }
 
   // Layer 5b: target crosshair at mouse - live reachability indicator
-  // (always "reachable" under reduced motion: the arm isn't tracking,
-  // and the stamp lands wherever the user clicks; while locked the
-  // reach that matters is the port's, not the pointer's)
-  const liveReach = reduceMotion.matches ? { reachable: true }
-                  : checkReach(target.x, target.y, target.toolAngle);
+  // (while locked the reach that matters is the port's, not the
+  // pointer's; while parked under reduced motion, the pointer's own
+  // reach is what a click would need)
+  const reachProbe = (reducedMotion() && !lock.el && !stampHead.job)
+                   ? { x: mouse.x, y: mouse.y, toolAngle: null } : target;
+  const liveReach = checkReach(reachProbe.x, reachProbe.y, reachProbe.toolAngle);
   // Touch devices have no pointer: only draw the reticle under a finger.
   const showReticle = hoverCapable || touch.active;
   if (showReticle) {

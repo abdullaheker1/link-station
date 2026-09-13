@@ -13,7 +13,7 @@ Render the page in a real browser at 1440×900, 768×1024, 390×844 and 320×568
 
 ## Arm model (don't regress it)
 - Joint state `q` is RELATIVE (A1 absolute, A2..A4 relative), with ranges in `JOINT_MIN/MAX`. `goalQ` comes from the analytic solver (`posture()` + `solveGoal()`); `updateMotors()` moves `q` toward it with per-joint vMax/aMax. Never go back to per-frame CCD on the drawn angles — it jittered, folded the wrist and never settled.
-- Target priority in `currentTarget()`: reduced-motion park > running stamp job > locked node port > (phone, no finger) `HOME_Q` > pointer.
+- Target priority in `currentTarget()`: running stamp job > locked node port > (reduced motion) park > (phone, no finger) `HOME_Q` > pointer. Reduced motion (`reducedMotion()`) must never freeze the arm — the owner's own desktop has GNOME animations off, which Chrome reports as prefers-reduced-motion. It only disables pointer chasing and the settle ring; `[ MOTION: FULL ]` (localStorage `linkstation.motion`) overrides it.
 - Phones: 64px left rail (CSS `.panel` margin), base at `(34, H-26)`, dock tool angle -45°, arm length fitted in `computeLengths()`. A pose that swings over the panel text on a phone is a bug.
 - Diagnostics (`?diag`) is the tuning tool: green ghost = goal pose, orange skeleton = motors, `ELBOW PT` must sit inside `ELBOW RING`.
 

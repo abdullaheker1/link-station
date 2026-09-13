@@ -27,7 +27,7 @@ shekerFND'nin bağlantı sayfası: Instagram, YouTube, GitHub, e-posta. Sıradan
 | `D` tuşu / `[ DIAG ]` düğmesi / `?diag` | **Diagnostik modu**: kol yarı saydamlaşır; iskelet, eklem açıları (A1–A4), uzuv boyları, çalışma uzayı halkası, hedef vektörü ve çözücü okuması görünür. |
 | `Tab` + `Enter` | Klavyeyle de kilitlenir ve damgalanır. |
 | **Telefonda** | Kol panelin solundaki rayda katlanmış bekler; bir node'a dokununca porta −45°'den yanaşıp mühürler, boş bir yere dokununca oraya gidip iz bırakır ve raya döner. Parmak ekrandayken parmağı izler. |
-| Sistem "hareketi azalt" ayarı | Kol park pozunda durur, damga anında basılır. |
+| Sistem "hareketi azalt" ayarı | HUD `MODE: REDUCED-MOTION` gösterir. Kol imleci kovalamaz (park pozunda bekler) ama yanaşma ve damga gibi kısa, istenen hareketler çalışır. `[ MOTION: FULL ]` düğmesi bu sayfa için ayarı geçersiz kılar (tarayıcıda hatırlanır). Linux/GNOME'da "Animasyonlar: kapalı", Windows'ta "Animasyon efektleri" bu ayarı tetikler. |
 
 Bir şey olmadığında döngü uyur (HUD: `STANDBY`); ilk hareketle uyanır.
 
@@ -79,5 +79,6 @@ Dosyayı tarayıcıda açman yeterli (`file://` çalışır). Değişiklikten so
 - **v2.6** (Mayıs 2026) — Claude 4.7 Opus ile üretildi: kol, damga, HUD, mobil düzen.
 - **v3.0** (Eylül 2026) — Claude Opus 5 ile yenilendi: `links.js`, OFFLINE node'lar, node kilidi + ROUTED mührü, diagnostik modu, uyuyan render döngüsü, `dvh` ile mobil kaydırma, reduced-motion, klavye odağı, OG/favicon.
 - **v3.1** (Eylül 2026) — "Sahne + beden": eklem motorları (hız/ivme profili, servo oturması), eklem aralıkları, analitik duruş çözücü (CCD kaldırıldı), yanaşmada bilek yönelimi, `APPROACH` fazı; telefonda sol ray, tezgâha göre kol boyu, ev pozu, dokunmayla yönlendirme.
+- **v3.1.1** — Azaltılmış hareket düzeltmesi: sistem "animasyonlar kapalı" iken kol tamamen donuyordu; artık yalnızca imleç takibi kapanır, HUD durumu gösterir ve `[ MOTION: FULL ]` ile geçersiz kılınabilir. Render döngüsü hata korumalı.
 
 MIT — bkz. [LICENSE](LICENSE).
