@@ -727,7 +727,39 @@ function computeLengths() {
 }
 computeLengths();
 
-const angles = [-Math.PI / 2, -Math.PI / 3, -Math.PI / 6, 0];
+/* ============================================================
+   JOINT STATE
+   ------------------------------------------------------------
+   q[i]     = joint angle, RELATIVE to the previous link (q[0] is
+              absolute, measured from screen +x; screen y points
+              down, so negative = counter-clockwise = "up").
+   goalQ[i] = where the IK solver wants each joint to be.
+   The motors (see MOTORS below) drive q toward goalQ with real
+   velocity and acceleration limits; the arm is drawn from q.
+   Absolute link angles are the running sum of q (see forwardKinematics).
+   ============================================================ */
+const q     = [-Math.PI / 2, Math.PI / 6, Math.PI / 6, Math.PI / 6];
+const goalQ = q.slice();
+const jointVel = [0, 0, 0, 0];   // rad/s
+
+// Joint range. Index 0 is absolute: the base link stays at least 30
+// degrees above the floor, like an arm on a pedestal. The others are
+// relative to the previous link, which is what stops the wrist from
+// folding back on itself when docking.
+const DEG = Math.PI / 180;
+const JOINT_MIN = [-150 * DEG, -140 * DEG, -125 * DEG, -100 * DEG];
+const JOINT_MAX = [ -30 * DEG,  140 * DEG,  125 * DEG,  100 * DEG];
+
+
+// Per-joint motor limits: smaller links spin faster, like a real arm.
+const MOTORS = [
+  { vMax: 2.4 /* rad/s */, aMax:  9 /* rad/s^2 */ },
+  { vMax: 3.4,             aMax: 14 },
+  { vMax: 5.0,             aMax: 24 },
+  { vMax: 7.0,             aMax: 36 },
+];
+
+const wrapPI = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
 /* ============================================================
    NODE LOCK
@@ -785,11 +817,15 @@ nodeListEl.addEventListener('keydown', e => {
   }
 });
 
-// What the IK solver is steering the end-effector toward this frame
+// What the IK solver is steering the end-effector toward this frame,
+// and how the tool should be oriented there (null = free).
+// A running stamp job wins: the arm finishes what it was told to do
+// before it goes back to following the pointer.
 function currentTarget() {
-  if (reduceMotion.matches) return getParkTarget();
-  if (lock.el && !lock.offline) return portPoint(lock.el);
-  return { x: mouse.x, y: mouse.y };
+  if (reduceMotion.matches) return { ...getParkTarget(), toolAngle: null };
+  if (stampHead.job) return { x: stampHead.job.x, y: stampHead.job.y, toolAngle: stampHead.job.toolAngle };
+  if (lock.el && !lock.offline) return { ...portPoint(lock.el), toolAngle: dockToolAngle() };
+  return { x: mouse.x, y: mouse.y, toolAngle: null };
 }
 
 /* ============================================================
@@ -825,13 +861,9 @@ window.addEventListener('keydown', e => {
 if (new URLSearchParams(location.search).has('diag')) setDiag(true);
 
 const RAD2DEG = 180 / Math.PI;
-const wrapPI = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
-// Joint angle as a controller would report it: relative to the previous
-// link, positive counter-clockwise on screen (i.e. "up" is positive).
-function jointDeg(i) {
-  const rel = i === 0 ? angles[0] : angles[i] - angles[i - 1];
-  return -wrapPI(rel) * RAD2DEG;
-}
+// Joint angle as a controller would report it: positive counter-
+// clockwise on screen (i.e. "up" is positive).
+const jointDeg = (i, joints = q) => -wrapPI(joints[i]) * RAD2DEG;
 const fmtDeg = d => ((d < 0 ? '-' : '+') + Math.abs(d).toFixed(1)).padStart(6, ' ') + '\u00b0';
 const pad3 = n => String(Math.round(n)).padStart(3, '0');
 const pad4 = n => String(Math.round(n)).padStart(4, ' ');
@@ -839,28 +871,34 @@ const pad4 = n => String(Math.round(n)).padStart(4, ' ');
 function drawDiagnostics(pts, target, now) {
   const base = pts[0];
   const ee = pts[pts.length - 1];
-  const reach = checkReach(target.x, target.y);
+  const reach = checkReach(target.x, target.y, target.toolAngle);
   const err = Math.hypot(target.x - ee.x, target.y - ee.y);
+  const goalPts = forwardKinematics(goalQ);
 
   ctx.save();
   ctx.font = '8px JetBrains Mono, monospace';
   ctx.lineWidth = 1;
 
-  // Workspace: everything between the two circles is reachable
+  // Workspace: the two-link ring the elbow point must fall in
   ctx.strokeStyle = 'rgba(255, 184, 0, 0.35)';
   ctx.setLineDash([4, 6]);
   ctx.beginPath();
-  ctx.arc(base.x, base.y, reach.maxReach, 0, Math.PI * 2);
+  ctx.arc(reach.cx, reach.cy, reach.maxReach, 0, Math.PI * 2);
   ctx.stroke();
   if (reach.minReach > 0) {
     ctx.beginPath();
-    ctx.arc(base.x, base.y, reach.minReach, 0, Math.PI * 2);
+    ctx.arc(reach.cx, reach.cy, reach.minReach, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.setLineDash([]);
   ctx.fillStyle = 'rgba(255, 184, 0, 0.7)';
   ctx.textAlign = 'left';
-  ctx.fillText(`R_MAX ${Math.round(reach.maxReach)}`, base.x + 6, base.y - reach.maxReach + 12);
+  ctx.fillText(`ELBOW RING ${Math.round(reach.minReach)}..${Math.round(reach.maxReach)}`, reach.cx + 6, reach.cy - reach.maxReach + 12);
+  // The elbow point the posture rule wants inside that ring
+  ctx.strokeStyle = reach.reachable ? 'rgba(0, 255, 102, 0.8)' : 'rgba(255, 58, 0, 0.8)';
+  ctx.strokeRect(reach.elbowX - 4, reach.elbowY - 4, 8, 8);
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.fillText('ELBOW PT', reach.elbowX + 8, reach.elbowY - 6);
 
   // Base frame
   ctx.strokeStyle = '#ff6a00';
@@ -872,14 +910,25 @@ function drawDiagnostics(pts, target, now) {
   ctx.fillStyle = '#ffb800';
   ctx.fillText('Y', base.x - 3, base.y - 42);
 
-  // Skeleton
+  // Goal pose (where the motors are heading) as a faint ghost
+  ctx.strokeStyle = 'rgba(0, 255, 102, 0.35)';
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  goalPts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (let i = 1; i < goalPts.length; i++) {
+    ctx.beginPath(); ctx.arc(goalPts[i].x, goalPts[i].y, 3, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // Skeleton (actual motor state)
   ctx.strokeStyle = '#ffb800';
   ctx.beginPath();
   pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
   ctx.stroke();
 
   // Joints: ring, A{i} angle; link length at each midpoint
-  for (let i = 0; i < angles.length; i++) {
+  for (let i = 0; i < q.length; i++) {
     const j = pts[i], k = pts[i + 1];
     ctx.strokeStyle = '#ffb800';
     ctx.beginPath(); ctx.arc(j.x, j.y, 5, 0, Math.PI * 2); ctx.stroke();
@@ -905,16 +954,19 @@ function drawDiagnostics(pts, target, now) {
   const loopMs = frameMs > 0 && frameMs < 250 ? frameMs.toFixed(1).padStart(5, ' ') + ' ms' : '   -- ms';
   const tgtLabel = reduceMotion.matches ? 'PARK'
                  : lock.el ? `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}` : 'FREE';
+  const toolTxt = target.toolAngle === null ? 'free' : `tool ${Math.round(-target.toolAngle * RAD2DEG)}\u00b0`;
   const lines = [
     'DIAGNOSTICS              [D] TOGGLE',
-    `SOLVER   CCD  8 iter  damp 0.25  ${armSettled ? 'SETTLED' : 'MOVING'}`,
+    `SOLVER   analytic 2R+wrist  ${toolTxt}  ${armSettled ? 'SETTLED' : 'MOVING'}`,
+    `MOTORS   err ${(motorState.maxErr * RAD2DEG).toFixed(2).padStart(6, ' ')}\u00b0  v ${(motorState.maxVel * RAD2DEG).toFixed(0).padStart(4, ' ')}\u00b0/s`,
     `LOOP     ${loopActive ? 'ONLINE ' : 'STANDBY'} ${loopMs}`,
     `TARGET   ${pad4(target.x)}, ${pad4(target.y)}  ${tgtLabel}`,
     `EE       ${pad4(ee.x)}, ${pad4(ee.y)}  ERR ${err.toFixed(1)} px`,
     `REACH    ${Math.round(reach.minReach)} .. ${Math.round(reach.maxReach)} px  ${reach.reachable ? 'IN RANGE' : 'OUT OF RANGE'}`,
+    '         actual    goal      vel      L',
   ];
-  for (let i = 0; i < angles.length; i++) {
-    lines.push(`A${i + 1}  ${fmtDeg(jointDeg(i))}   L${i + 1} ${String(Math.round(armLengths[i])).padStart(4, ' ')}`);
+  for (let i = 0; i < q.length; i++) {
+    lines.push(`A${i + 1}  ${fmtDeg(jointDeg(i))}  ${fmtDeg(jointDeg(i, goalQ))}  ${(-jointVel[i] * RAD2DEG).toFixed(0).padStart(5, ' ')}\u00b0/s  ${String(Math.round(armLengths[i])).padStart(4, ' ')}`);
   }
   lines.push(`STAMPS   ${pad3(stamps.length)} active / ${pad3(stampCounter)} total`);
   lines.push(`HEAD     ${PHASE_NAMES[stampHead.phase]}  piston ${(stampHead.pistonExtension * 100).toFixed(0).padStart(3, ' ')}%`);
@@ -928,6 +980,7 @@ const PHASE_IDLE = 0;
 const PHASE_PRESS = 1;
 const PHASE_PRINT = 2;
 const PHASE_RETRACT = 3;
+const PHASE_APPROACH = 4;   // travelling to the job before pressing
 
 const stampHead = {
   phase: PHASE_IDLE,
@@ -935,33 +988,33 @@ const stampHead = {
   pistonExtension: 0,  // 0 = retracted, 1 = fully extended
   pressureRing: 0,     // shockwave ring opacity 0-1
   pendingStamp: null,  // {x, y, reachable, kind, label} - next stamp
+  job: null,           // {x, y, toolAngle} the arm is committed to until IDLE
   wasOutOfReach: false // tracks last click reachability for HUD/crosshair feedback
 };
 
+// Tool orientation used when meeting a port: straight into the row.
+function dockToolAngle() {
+  return 0;
+}
+
 /* ----------------------------------------------------------
-   Reachability test - is target inside annular workspace?
-   - Outer bound: sum of all link lengths
-   - Inner bound: longest link - sum of others (can't fold tighter)
-   Returns { reachable, distance, maxReach, minReach }
+   Reachability test
+   Exact for the posture rule: the target is reachable iff the elbow
+   point it implies lies inside the two-link ring around the base.
+   Returns the ring (for the diagnostics overlay) and the elbow point.
    ---------------------------------------------------------- */
-function checkReach(targetX, targetY) {
-  const base = getBase();
-  const dx = targetX - base.x;
-  const dy = targetY - base.y;
-  const distance = Math.hypot(dx, dy);
-
-  const maxReach = armLengths.reduce((a, b) => a + b, 0);
-  const longest = Math.max(...armLengths);
-  const rest = maxReach - longest;
-  const minReach = Math.max(0, longest - rest);
-
+function checkReach(targetX, targetY, toolAngle = null) {
+  const { base, elbowX, elbowY } = posture(targetX, targetY, toolAngle);
+  const ring = twoLinkRing();
+  const distance = Math.hypot(elbowX - base.x, elbowY - base.y);
   // Tolerance: leave 2px breathing room so stamps right at the
   // edge don't oscillate between reachable/unreachable
-  const reachable = distance <= maxReach - 2 && distance >= minReach;
-  return { reachable, distance, maxReach, minReach };
+  const reachable = distance <= ring.outer - 2 && distance >= ring.inner + 2;
+  return { reachable, distance, maxReach: ring.outer, minReach: ring.inner, cx: base.x, cy: base.y, elbowX, elbowY };
 }
 
 const PHASE_DURATIONS = {
+  [PHASE_APPROACH]: 1500,   // upper bound; normally ends on arrival
   [PHASE_PRESS]: 140,
   [PHASE_PRINT]: 60,
   [PHASE_RETRACT]: 260
@@ -984,16 +1037,22 @@ function triggerStamp(x, y) {
   if (stampHead.phase === PHASE_IDLE) {
     // Locked on a live node: the stamp goes on the port, not under
     // the pointer, and is labelled with the node it routed to.
-    let kind = 'mark', label = '';
+    let kind = 'mark', label = '', toolAngle = null;
     if (lock.el && !lock.offline) {
       const port = portPoint(lock.el);
       x = port.x; y = port.y;
       kind = 'route';
       label = lock.name;
+      toolAngle = dockToolAngle();
     }
-    const reach = checkReach(x, y);
-    stampHead.phase = PHASE_PRESS;
+    const reach = checkReach(x, y, toolAngle);
+    // The arm first travels to the job (APPROACH) and only presses
+    // once the motors have arrived - with real joint speeds a click
+    // right after a flick would otherwise print before the head is
+    // anywhere near the point.
+    stampHead.phase = PHASE_APPROACH;
     stampHead.phaseStart = performance.now();
+    stampHead.job = { x, y, toolAngle };
     // Store both target intent and reachability flag.
     // If unreachable, actual stamp coords will be resolved
     // at commit time from current EE position.
@@ -1013,7 +1072,19 @@ function updateStampHead(now) {
   const dur = PHASE_DURATIONS[stampHead.phase];
   const t = Math.min(elapsed / dur, 1);
 
-  if (stampHead.phase === PHASE_PRESS) {
+  if (stampHead.phase === PHASE_APPROACH) {
+    // Arrived = motors quiet and the effector on the job point (or as
+    // close as the workspace allows). The timeout is a safety net.
+    const pts = forwardKinematics();
+    const ee = pts[pts.length - 1];
+    const job = stampHead.job;
+    const closeEnough = Math.hypot(job.x - ee.x, job.y - ee.y) < 6 || !stampHead.pendingStamp.reachable;
+    const quiet = motorState.maxErr < 0.012 && motorState.maxVel < 0.25;
+    if ((quiet && closeEnough) || t >= 1) {
+      stampHead.phase = PHASE_PRESS;
+      stampHead.phaseStart = now;
+    }
+  } else if (stampHead.phase === PHASE_PRESS) {
     // Ease-in cubic - piston accelerates downward
     stampHead.pistonExtension = t * t;
     if (t >= 1) {
@@ -1055,6 +1126,7 @@ function updateStampHead(now) {
     if (t >= 1) {
       stampHead.phase = PHASE_IDLE;
       stampHead.pistonExtension = 0;
+      stampHead.job = null;
     }
   }
 }
@@ -1194,54 +1266,167 @@ function drawStamps(now) {
 /* ============================================================
    IK
    ============================================================ */
-function forwardKinematics() {
+// Joint positions for a set of relative joint angles; pts[0] is the
+// base, pts[4] the end-effector. Defaults to the drawn (motor) state.
+function forwardKinematics(joints = q) {
   const base = getBase();
   const pts = [{ x: base.x, y: base.y }];
-  let x = base.x, y = base.y;
-  for (let i = 0; i < angles.length; i++) {
-    x += Math.cos(angles[i]) * armLengths[i];
-    y += Math.sin(angles[i]) * armLengths[i];
+  let x = base.x, y = base.y, a = 0;
+  for (let i = 0; i < joints.length; i++) {
+    a += joints[i];
+    x += Math.cos(a) * armLengths[i];
+    y += Math.sin(a) * armLengths[i];
     pts.push({ x, y });
   }
   return pts;
 }
 
-// Returns the largest per-joint correction applied this call (radians),
-// which is ~0 once the arm has converged on (or stretched toward) the target.
-function solveIK(targetX, targetY) {
-  const iterations = 8;
-  let maxDelta = 0;
-  for (let iter = 0; iter < iterations; iter++) {
-    for (let i = angles.length - 1; i >= 0; i--) {
-      const pts = forwardKinematics();
-      const ee = pts[pts.length - 1];
-      const joint = pts[i];
+/* ----------------------------------------------------------
+   Goal solve - analytic, the way a real controller does it
+   Writes the solution into goalQ; the motors do the moving.
 
-      const angToEE = Math.atan2(ee.y - joint.y, ee.x - joint.x);
-      const angToTarget = Math.atan2(targetY - joint.y, targetX - joint.x);
-      let delta = angToTarget - angToEE;
-      while (delta > Math.PI) delta -= 2 * Math.PI;
-      while (delta < -Math.PI) delta += 2 * Math.PI;
-      delta *= 0.25;
-      maxDelta = Math.max(maxDelta, Math.abs(delta));
+   1. Tool: pointed at toolAngle if given (docking), otherwise from
+      the SHOULDER (top of an upright base link) toward the target.
+   2. Wrist centre = target - L4 along the tool.
+   3. Forearm: from the shoulder toward the wrist centre. Elbow point
+      = wrist - L3 along the forearm. Measuring from the shoulder
+      rather than the base is what makes the arm come down from above
+      on targets near the floor instead of trying to fold under itself.
+   4. Upper arm + arm (L1, L2) reach the elbow point with the closed-
+      form two-link solution; of the two mirror solutions the one
+      that respects the joint ranges with the least wrist bend wins.
+   Steps 1-3 resolve the redundancy of a 4-link planar chain with a
+   posture rule instead of an iterative search, so the pose for a
+   given target is always the same, never jitters and never folds.
+   Joint ranges are applied last; when the elbow point is outside the
+   two-link ring the arm stretches/folds toward it and the residual
+   shows up as an out-of-reach stamp.
 
-      for (let j = i; j < angles.length; j++) angles[j] += delta;
+   Returns the remaining distance (px) between EE and target.
+   ---------------------------------------------------------- */
+function posture(targetX, targetY, toolAngle) {
+  const base = getBase();
+  const L = armLengths;
+  const shoulderX = base.x, shoulderY = base.y - L[0];
+  const tool = toolAngle === null
+    ? Math.atan2(targetY - shoulderY, targetX - shoulderX)
+    : toolAngle;
+  const wristX = targetX - Math.cos(tool) * L[3];
+  const wristY = targetY - Math.sin(tool) * L[3];
+  const fore = Math.atan2(wristY - shoulderY, wristX - shoulderX);
+  const elbowX = wristX - Math.cos(fore) * L[2];
+  const elbowY = wristY - Math.sin(fore) * L[2];
+  return { base, tool, fore, elbowX, elbowY };
+}
 
-      if (i === 0) {
-        const minA = -Math.PI + 0.15;
-        const maxA = -0.15;
-        if (angles[0] < minA) {
-          const diff = minA - angles[0];
-          for (let j = 0; j < angles.length; j++) angles[j] += diff;
-        }
-        if (angles[0] > maxA) {
-          const diff = maxA - angles[0];
-          for (let j = 0; j < angles.length; j++) angles[j] += diff;
-        }
-      }
+// Two-link ring the elbow point must fall in: outer = stretched,
+// inner = elbow folded to its joint limit.
+function twoLinkRing() {
+  const L = armLengths;
+  const outer = L[0] + L[1] - 0.5;
+  const inner = Math.sqrt(L[0] * L[0] + L[1] * L[1] + 2 * L[0] * L[1] * Math.cos(JOINT_MAX[1])) + 0.5;
+  return { outer, inner };
+}
+
+function solveGoal(targetX, targetY, toolAngle = null) {
+  const L = armLengths;
+  const { base, tool, fore, elbowX, elbowY } = posture(targetX, targetY, toolAngle);
+  const ring = twoLinkRing();
+
+  // Two-link IK (L1, L2) from the base to the elbow point
+  const ex = elbowX - base.x, ey = elbowY - base.y;
+  const r = Math.hypot(ex, ey);
+  const rc = Math.min(ring.outer, Math.max(ring.inner, r));
+  const cosQ1 = (rc * rc - L[0] * L[0] - L[1] * L[1]) / (2 * L[0] * L[1]);
+  const q1mag = Math.acos(Math.max(-1, Math.min(1, cosQ1)));
+  const heading = Math.atan2(ey, ex);
+
+  // Candidate elbow angles: +q1 bends clockwise on screen, -q1 counter-
+  // clockwise. Score each mirror solution by how badly it violates the
+  // joint ranges, then by how much the wrist has to bend; the arm
+  // takes the pose that "flows" into the forearm direction.
+  let best = null;
+  for (const q1 of [q1mag, -q1mag]) {
+    const q0 = wrapPI(heading - Math.atan2(L[1] * Math.sin(q1), L[0] + L[1] * Math.cos(q1)));
+    const q2 = wrapPI(fore - (q0 + q1));
+    const violation =
+      Math.max(0, JOINT_MIN[0] - q0, q0 - JOINT_MAX[0]) +
+      Math.max(0, Math.abs(q2) - JOINT_MAX[2]);
+    const score = violation * 10 + Math.abs(q2);
+    if (!best || score < best.score) best = { q0, q1, score };
+  }
+
+  goalQ[0] = Math.min(JOINT_MAX[0], Math.max(JOINT_MIN[0], best.q0));
+  goalQ[1] = Math.min(JOINT_MAX[1], Math.max(JOINT_MIN[1], best.q1));
+  goalQ[2] = Math.min(JOINT_MAX[2], Math.max(JOINT_MIN[2], wrapPI(fore - (goalQ[0] + goalQ[1]))));
+  goalQ[3] = Math.min(JOINT_MAX[3], Math.max(JOINT_MIN[3], wrapPI(tool - fore)));
+
+  const pts = forwardKinematics(goalQ);
+  const ee = pts[pts.length - 1];
+  return Math.hypot(targetX - ee.x, targetY - ee.y);
+}
+
+/* ----------------------------------------------------------
+   Motors - trapezoidal velocity profile per joint
+   Each joint accelerates at aMax toward vMax, cruises, and follows
+   the deceleration curve v = sqrt(2 * aMax * d) into the goal, with
+   a proportional zone at the end so it lands without chatter. Big
+   moves therefore take time and fast pointer flicks leave the arm
+   visibly behind - it has to catch up like a machine, not a cursor.
+   Returns the largest remaining error / velocity for settle checks.
+   ---------------------------------------------------------- */
+const motorState = { maxErr: 0, maxVel: 0 };
+const settle = [0, 0, 0, 0].map(() => ({ t0: -1e9, amp: 0, peak: 0 }));
+const SETTLE_TAU = 140, SETTLE_HZ = 8;
+
+function updateMotors(dt, now) {
+  let maxErr = 0, maxVel = 0;
+  for (let i = 0; i < q.length; i++) {
+    const m = MOTORS[i];
+    // No angle wrapping here: goals are clamped to the joint range and
+    // the motor must travel inside it, never "the short way round".
+    const err = goalQ[i] - q[i];
+    const dist = Math.abs(err);
+    // Desired speed at this distance: deceleration curve, capped, with
+    // a linear finish inside the last ~4 degrees.
+    let vDes = Math.min(Math.sqrt(2 * m.aMax * dist), dist * 14, m.vMax) * Math.sign(err);
+    const dv = Math.max(-m.aMax * dt, Math.min(m.aMax * dt, vDes - jointVel[i]));
+    jointVel[i] += dv;
+    let step = jointVel[i] * dt;
+    if (Math.abs(step) >= dist) { step = err; jointVel[i] *= 0.5; }
+    q[i] += step;
+
+    // Servo settle: remember the fastest this joint went since it last
+    // stopped; when it stops after a real move, ring briefly with an
+    // amplitude proportional to that speed.
+    const s = settle[i];
+    s.peak = Math.max(s.peak, Math.abs(jointVel[i]));
+    if (dist < 0.01 && Math.abs(jointVel[i]) < 0.05 && s.peak > 0.4) {
+      s.amp = Math.min(0.012, 0.0035 * s.peak);   // up to ~0.7 deg
+      s.t0 = now;
+      s.peak = 0;
+    }
+    maxErr = Math.max(maxErr, dist);
+    maxVel = Math.max(maxVel, Math.abs(jointVel[i]));
+  }
+  motorState.maxErr = maxErr;
+  motorState.maxVel = maxVel;
+}
+
+// Joint angles as drawn: motor state plus the decaying settle ring.
+function drawnJoints(now) {
+  const out = q.slice();
+  for (let i = 0; i < out.length; i++) {
+    const s = settle[i];
+    const age = now - s.t0;
+    if (age < SETTLE_TAU * 6) {
+      out[i] += s.amp * Math.exp(-age / SETTLE_TAU) * Math.sin(age / 1000 * SETTLE_HZ * Math.PI * 2);
     }
   }
-  return maxDelta;
+  return out;
+}
+function settleActive(now) {
+  return settle.some(s => now - s.t0 < SETTLE_TAU * 6);
 }
 
 /* ============================================================
@@ -1579,6 +1764,7 @@ const sysDotEl = document.getElementById('sysDot');
 
 const PHASE_NAMES = {
   [PHASE_IDLE]: 'IDLE',
+  [PHASE_APPROACH]: 'APPROACH',
   [PHASE_PRESS]: 'PRESS',
   [PHASE_PRINT]: 'PRINT',
   [PHASE_RETRACT]: 'RETRACT'
@@ -1594,8 +1780,15 @@ function render(now) {
   // point on mobile) - same behaviour on every platform - unless the
   // user asked for reduced motion, in which case it holds a park pose.
   const target = currentTarget();
-  const ikDelta = solveIK(target.x, target.y);
-  armSettled = ikDelta < 1e-4;
+  solveGoal(target.x, target.y, target.toolAngle);
+  if (reduceMotion.matches) {
+    // No dynamics: joints snap to the solution.
+    for (let i = 0; i < q.length; i++) { q[i] = goalQ[i]; jointVel[i] = 0; }
+    motorState.maxErr = 0; motorState.maxVel = 0;
+  } else {
+    updateMotors(Math.min(frameMs, 50) / 1000, now);
+  }
+  armSettled = motorState.maxErr < 0.002 && motorState.maxVel < 0.02 && !settleActive(now);
 
   ctx.clearRect(0, 0, W, H);
 
@@ -1612,7 +1805,7 @@ function render(now) {
   }
 
   // Layer 3: arm (ghosted under the diagnostics overlay)
-  const pts = forwardKinematics();
+  const pts = forwardKinematics(drawnJoints(now));
   if (diag) ctx.globalAlpha = 0.35;
   drawBase();
 
@@ -1672,7 +1865,7 @@ function render(now) {
   // and the stamp lands wherever the user clicks; while locked the
   // reach that matters is the port's, not the pointer's)
   const liveReach = reduceMotion.matches ? { reachable: true }
-                  : checkReach(target.x, target.y);
+                  : checkReach(target.x, target.y, target.toolAngle);
   ctx.save();
   ctx.translate(mouse.x, mouse.y);
   // Color logic:
