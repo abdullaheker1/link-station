@@ -408,7 +408,7 @@
     }
     /* ...except the diagnostics toggle: keep the block, drop the
        version string, enlarge the tap target */
-    .hud-bl { bottom: 16px; left: 16px; }
+    .hud-bl { bottom: 16px; left: auto; right: 16px; }
     .hud-bl .ver { display: none; }
     .diag-toggle { margin-left: 0; padding: 7px 10px; font-size: 10px; }
 
@@ -420,16 +420,21 @@
       line-height: 1.6;
     }
 
-    /* Panel tightened for small viewports */
+    /* Panel tightened and pushed right, leaving a 64px rail on the
+       left where the arm lives: its base sits at the bottom of the
+       rail and every node's port is inside it, so the arm reaches
+       all nodes without crossing the text. */
     .panel {
       padding: 16px;
+      width: min(420px, calc(100% - 64px));
+      margin-left: 64px;
     }
 
     .container {
       padding: 16px;
       justify-content: flex-start;
       padding-top: 6vh;
-      padding-bottom: 32px;
+      padding-bottom: 72px;   /* room for the fixed DIAG toggle on short screens */
       height: auto;
       min-height: 100dvh;
     }
@@ -605,6 +610,7 @@ window.addEventListener('error', () => document.documentElement.classList.add('n
 const canvas = document.getElementById('robotCanvas');
 const ctx = canvas.getContext('2d');
 const dpr = window.devicePixelRatio || 1;
+const DEG = Math.PI / 180;
 
 let W = 0, H = 0;
 function resize() {
@@ -625,8 +631,9 @@ const mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 // animation). Fades and the reticle are left as-is; they don't move.
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 function getParkTarget() {
+  if (isMobile()) return homeTarget();
   const base = getBase();
-  return { x: base.x + W * 0.14, y: H * 0.48 };
+  return { x: base.x + W * 0.14, y: H * 0.48, toolAngle: null };
 }
 
 // Debounced resize: mobile browsers fire resize constantly as
@@ -684,10 +691,14 @@ window.addEventListener('touchstart', e => {
   if (e.touches[0]) {
     mouse.x = e.touches[0].clientX;
     mouse.y = e.touches[0].clientY;
+    touch.active = true;
     noteInput();
     triggerStamp(mouse.x, mouse.y);
   }
 }, { passive: true });
+const touchDone = () => { touch.active = false; noteInput(); };
+window.addEventListener('touchend', touchDone, { passive: true });
+window.addEventListener('touchcancel', touchDone, { passive: true });
 
 // Mobile detection - matches the CSS breakpoint so JS layout
 // math stays in sync with the visual layout
@@ -697,35 +708,59 @@ function isMobile() {
 
 function getBase() {
   if (isMobile()) {
-    // On mobile the arm is a dim background element. Anchor it
-    // lower-left but pull slightly off-screen so the elbow sweep
-    // sits behind the panel instead of across the title.
-    return { x: W * 0.10, y: H - 30 };
+    // Phones: bottom of the left rail (see the mobile CSS).
+    return { x: 34, y: H - 26 };
   }
   return { x: W * 0.16, y: H - 50 };
 }
 
-let armLengths = [];
-function computeLengths() {
-  let total;
-  if (isMobile()) {
-    // Width-based, not diagonal-based: tall narrow phones have a
-    // huge diagonal relative to width, which previously made the
-    // arm overshoot across the whole screen. Scale to width and
-    // cap so the arm stays compact behind the content.
-    total = Math.min(W * 1.15, H * 0.55);
-  } else {
-    const diag = Math.hypot(W, H);
-    total = diag * 0.55;
-  }
-  armLengths = [
-    total * 0.34,
-    total * 0.28,
-    total * 0.18,
-    total * 0.10
-  ];
+// Where the arm waits on phones when nothing is asking for it. Given
+// as joint angles, not as a point to solve for: a folded zig-zag that
+// stays inside the 64px rail (elbow a hair off the left edge, head
+// raised and pointing up-right). Desktop has no home; the arm follows
+// the pointer.
+const HOME_Q = [-100 * DEG, 20 * DEG, -20 * DEG, 40 * DEG];
+function homeTarget() {
+  const pts = forwardKinematics(HOME_Q);
+  const ee = pts[pts.length - 1];
+  return { x: ee.x, y: ee.y, toolAngle: null, pose: HOME_Q };
 }
-computeLengths();
+
+// Touch is only "steering" the arm while a finger is down.
+const touch = { active: false };
+
+let armLengths = [];
+const LINK_FRACTIONS = [0.34, 0.28, 0.18, 0.10];
+function setLengths(total) {
+  armLengths = LINK_FRACTIONS.map(f => total * f);
+}
+function computeLengths() {
+  if (isMobile()) {
+    // Size the arm to its workbench: start compact and grow until the
+    // docking pose can reach every node's port (the top one is the
+    // demanding case), capped so a very long node list doesn't produce
+    // an absurd arm - anything still out of reach gets LIMIT stamps.
+    let total = Math.min(W * 1.15, H * 0.55);
+    const cap = H * 0.95;
+    setLengths(total);
+    const ports = [...document.querySelectorAll('#nodeList .link')].map(portPoint);
+    for (let i = 0; i < 16 && total < cap; i++) {
+      // "Too far" = the docking elbow point is near or beyond the outer
+      // ring; ports beside the base (inner-ring cases on very short
+      // screens) can't be fixed by a longer arm and are left alone.
+      const tooFar = ports.some(pt => {
+        const r = checkReach(pt.x, pt.y, dockToolAngle());
+        return r.distance > r.maxReach * 0.92;
+      });
+      if (!tooFar) break;
+      total = Math.min(cap, total * 1.06);
+      setLengths(total);
+    }
+  } else {
+    setLengths(Math.hypot(W, H) * 0.55);
+  }
+}
+// (first call is at the end of the script, once ports and joint ranges exist)
 
 /* ============================================================
    JOINT STATE
@@ -746,9 +781,8 @@ const jointVel = [0, 0, 0, 0];   // rad/s
 // degrees above the floor, like an arm on a pedestal. The others are
 // relative to the previous link, which is what stops the wrist from
 // folding back on itself when docking.
-const DEG = Math.PI / 180;
-const JOINT_MIN = [-150 * DEG, -140 * DEG, -125 * DEG, -100 * DEG];
-const JOINT_MAX = [ -30 * DEG,  140 * DEG,  125 * DEG,  100 * DEG];
+const JOINT_MIN = [-150 * DEG, -152 * DEG, -125 * DEG, -100 * DEG];
+const JOINT_MAX = [ -30 * DEG,  152 * DEG,  125 * DEG,  100 * DEG];
 
 
 // Per-joint motor limits: smaller links spin faster, like a real arm.
@@ -822,9 +856,10 @@ nodeListEl.addEventListener('keydown', e => {
 // A running stamp job wins: the arm finishes what it was told to do
 // before it goes back to following the pointer.
 function currentTarget() {
-  if (reduceMotion.matches) return { ...getParkTarget(), toolAngle: null };
+  if (reduceMotion.matches) return getParkTarget();
   if (stampHead.job) return { x: stampHead.job.x, y: stampHead.job.y, toolAngle: stampHead.job.toolAngle };
   if (lock.el && !lock.offline) return { ...portPoint(lock.el), toolAngle: dockToolAngle() };
+  if (isMobile() && !touch.active) return homeTarget();
   return { x: mouse.x, y: mouse.y, toolAngle: null };
 }
 
@@ -953,7 +988,9 @@ function drawDiagnostics(pts, target, now) {
   // Readout
   const loopMs = frameMs > 0 && frameMs < 250 ? frameMs.toFixed(1).padStart(5, ' ') + ' ms' : '   -- ms';
   const tgtLabel = reduceMotion.matches ? 'PARK'
-                 : lock.el ? `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}` : 'FREE';
+                 : stampHead.job ? 'JOB'
+                 : lock.el ? `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}`
+                 : target.pose ? 'HOME' : 'FREE';
   const toolTxt = target.toolAngle === null ? 'free' : `tool ${Math.round(-target.toolAngle * RAD2DEG)}\u00b0`;
   const lines = [
     'DIAGNOSTICS              [D] TOGGLE',
@@ -992,9 +1029,11 @@ const stampHead = {
   wasOutOfReach: false // tracks last click reachability for HUD/crosshair feedback
 };
 
-// Tool orientation used when meeting a port: straight into the row.
+// Tool orientation used when meeting a port: straight into the row on
+// desktop; from below-left on phones, where the port sits in a narrow
+// rail and a horizontal tool would put the wrist off-screen.
 function dockToolAngle() {
-  return 0;
+  return isMobile() ? -45 * DEG : 0;
 }
 
 /* ----------------------------------------------------------
@@ -1185,7 +1224,10 @@ function drawStamps(now) {
                    : isLimit ? 'rgba(255, 184, 0, 0.15)'
                    : 'rgba(255, 106, 0, 0.15)';
     // Routed seals sit on a row's left edge, so their labels go on the
-    // free side (left); everything else labels to the right.
+    // free side (left); everything else labels to the right. On phones
+    // the left side is the screen edge, so routed labels go underneath,
+    // right-aligned to the seal.
+    const below = isRoute && isMobile();
     const side = isRoute ? -1 : 1;
 
     // Outer hexagonal stamp boundary
@@ -1227,25 +1269,26 @@ function drawStamps(now) {
                   : isLimit ? 'rgba(255, 184, 0, 0.85)'
                   : 'rgba(255, 106, 0, 0.8)';
     ctx.font = '8px JetBrains Mono, monospace';
-    ctx.textAlign = side > 0 ? 'left' : 'right';
-    const lx = side * (r + 4);
-    ctx.fillText(`#${String(s.id).padStart(3, '0')}`, lx, 3);
+    ctx.textAlign = below ? 'right' : side > 0 ? 'left' : 'right';
+    const lx = below ? r : side * (r + 4);
+    const ly = below ? r + 14 : 3;
+    ctx.fillText(`#${String(s.id).padStart(3, '0')}`, lx, ly);
 
     // Timestamp + status label
     ctx.fillStyle = 'rgba(136, 130, 120, 0.7)';
     ctx.font = '7px JetBrains Mono, monospace';
     const ms = Math.floor((now - s.born));
-    ctx.fillText(`T+${String(ms).padStart(4, '0')}ms`, lx, 13);
+    ctx.fillText(`T+${String(ms).padStart(4, '0')}ms`, lx, ly + 10);
 
     // Third line: LIMIT for out-of-reach, ROUTED // NODE for seals
     if (isLimit) {
       ctx.fillStyle = 'rgba(255, 58, 0, 0.85)';
       ctx.font = '7px JetBrains Mono, monospace';
-      ctx.fillText('LIMIT', lx, 23);
+      ctx.fillText('LIMIT', lx, ly + 20);
     } else if (isRoute) {
       ctx.fillStyle = 'rgba(0, 255, 102, 0.85)';
       ctx.font = '7px JetBrains Mono, monospace';
-      ctx.fillText(`ROUTED // ${s.label}`, lx, 23);
+      ctx.fillText(`ROUTED // ${s.label}`, lx, ly + 20);
     }
 
     // Subtle dashed accent ring
@@ -1780,7 +1823,11 @@ function render(now) {
   // point on mobile) - same behaviour on every platform - unless the
   // user asked for reduced motion, in which case it holds a park pose.
   const target = currentTarget();
-  solveGoal(target.x, target.y, target.toolAngle);
+  if (target.pose) {
+    for (let i = 0; i < q.length; i++) goalQ[i] = target.pose[i];
+  } else {
+    solveGoal(target.x, target.y, target.toolAngle);
+  }
   if (reduceMotion.matches) {
     // No dynamics: joints snap to the solution.
     for (let i = 0; i < q.length; i++) { q[i] = goalQ[i]; jointVel[i] = 0; }
@@ -1866,6 +1913,9 @@ function render(now) {
   // reach that matters is the port's, not the pointer's)
   const liveReach = reduceMotion.matches ? { reachable: true }
                   : checkReach(target.x, target.y, target.toolAngle);
+  // Touch devices have no pointer: only draw the reticle under a finger.
+  const showReticle = hoverCapable || touch.active;
+  if (showReticle) {
   ctx.save();
   ctx.translate(mouse.x, mouse.y);
   // Color logic:
@@ -1909,6 +1959,7 @@ function render(now) {
     ctx.fillText(lock.el ? (lock.offline ? 'NO ROUTE' : 'LOCKED') : 'OUT OF REACH', 0, 34);
   }
   ctx.restore();
+  }
 
   // HUD telemetry
   eePosEl.textContent = `${String(Math.round(ee.x)).padStart(3, '0')}, ${String(Math.round(ee.y)).padStart(3, '0')}`;
@@ -1943,6 +1994,14 @@ function render(now) {
   }
 }
 
+computeLengths();
+// Web fonts reflow the panel; re-fit the arm once they're in.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => { computeLengths(); wake(); });
+}
+if (!hoverCapable) {
+  document.querySelector('.subtitle').textContent = '\u2014 TAP to mark \u00b7 tap a node to connect \u2014';
+}
 wake();
 </script>
 </body>
