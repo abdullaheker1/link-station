@@ -13,7 +13,7 @@ A personal link-in-bio page guarded by a 4-DOF industrial robot arm. The arm has
 
 ## Bu ne?
 
-shekerFND'nin bağlantı sayfası: Instagram, YouTube, GitHub, e-posta. Sıradan bir liste yerine KUKA-turuncusu bir robot kol imleci takip eder, üzerine geldiğin düğüme (node) yanaşır, tıklayınca damga basar.
+apollon'un bağlantı sayfası: Instagram, YouTube, GitHub, e-posta. Sıradan bir liste yerine KUKA-turuncusu bir robot kol imleci takip eder, üzerine geldiğin düğüme (node) yanaşır, tıklayınca damga basar.
 
 ### Etkileşim
 
@@ -80,5 +80,6 @@ Dosyayı tarayıcıda açman yeterli (`file://` çalışır). Değişiklikten so
 - **v3.0** (Eylül 2026) — Claude Opus 5 ile yenilendi: `links.js`, OFFLINE node'lar, node kilidi + ROUTED mührü, diagnostik modu, uyuyan render döngüsü, `dvh` ile mobil kaydırma, reduced-motion, klavye odağı, OG/favicon.
 - **v3.1** (Eylül 2026) — "Sahne + beden": eklem motorları (hız/ivme profili, servo oturması), eklem aralıkları, analitik duruş çözücü (CCD kaldırıldı), yanaşmada bilek yönelimi, `APPROACH` fazı; telefonda sol ray, tezgâha göre kol boyu, ev pozu, dokunmayla yönlendirme.
 - **v3.1.1** — Azaltılmış hareket düzeltmesi: sistem "animasyonlar kapalı" iken kol tamamen donuyordu; artık yalnızca imleç takibi kapanır, HUD durumu gösterir ve `[ MOTION: FULL ]` ile geçersiz kılınabilir. Render döngüsü hata korumalı.
+- **v3.1.2** — Operatör adı `apollon`; kısa masaüstü pencerelerinde (≤ 720 px) kompakt düzen ve sığmazsa kaydırma (OPERATOR etiketi/şerit artık kırpılmıyor); HUD düğmeleri sol altta sütun.
 
 MIT — bkz. [LICENSE](LICENSE).
