@@ -39,7 +39,7 @@
     --grid: rgba(255, 106, 0, 0.05);
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   html, body {
     height: 100%;
@@ -714,12 +714,11 @@ function getBase() {
   return { x: W * 0.16, y: H - 50 };
 }
 
-// Where the arm waits on phones when nothing is asking for it. Given
-// as joint angles, not as a point to solve for: a folded zig-zag that
-// stays inside the 64px rail (elbow a hair off the left edge, head
-// raised and pointing up-right). Desktop has no home; the arm follows
-// the pointer.
-const HOME_Q = [-100 * DEG, 20 * DEG, -20 * DEG, 40 * DEG];
+// Where the arm waits on phones when nothing is asking for it. HOME_Q
+// is given as joint angles, not as a point to solve for: a folded
+// zig-zag that stays inside the 64px rail (elbow a hair off the left
+// edge, head raised and pointing up-right). Desktop has no home; the
+// arm follows the pointer.
 function homeTarget() {
   const pts = forwardKinematics(HOME_Q);
   const ee = pts[pts.length - 1];
@@ -773,7 +772,8 @@ function computeLengths() {
    velocity and acceleration limits; the arm is drawn from q.
    Absolute link angles are the running sum of q (see forwardKinematics).
    ============================================================ */
-const q     = [-Math.PI / 2, Math.PI / 6, Math.PI / 6, Math.PI / 6];
+const HOME_Q = [-100 * DEG, 20 * DEG, -20 * DEG, 40 * DEG];   // phone rest pose (see homeTarget)
+const q     = isMobile() ? HOME_Q.slice() : [-Math.PI / 2, Math.PI / 6, Math.PI / 6, Math.PI / 6];
 const goalQ = q.slice();
 const jointVel = [0, 0, 0, 0];   // rad/s
 
@@ -1395,7 +1395,14 @@ function solveGoal(targetX, targetY, toolAngle = null) {
     const violation =
       Math.max(0, JOINT_MIN[0] - q0, q0 - JOINT_MAX[0]) +
       Math.max(0, Math.abs(q2) - JOINT_MAX[2]);
-    const score = violation * 10 + Math.abs(q2);
+    let score = violation * 10 + Math.abs(q2);
+    if (isMobile()) {
+      // In the rail a folded elbow has to stick out somewhere: prefer
+      // the screen edge (left) over the panel (right), so the text
+      // stays readable and the arm reads as reaching in from outside.
+      const elbowJointX = base.x + Math.cos(q0) * L[0];
+      score += Math.max(0, elbowJointX - (base.x + 30)) / 60;
+    }
     if (!best || score < best.score) best = { q0, q1, score };
   }
 
