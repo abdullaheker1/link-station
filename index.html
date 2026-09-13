@@ -113,6 +113,45 @@
   .hud-tl { top: 24px; left: 24px; }
   .hud-tr { top: 24px; right: 24px; text-align: right; }
   .hud-bl { bottom: 24px; left: 24px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.3em; }
+
+  /* Diagnostics toggle lives in the bottom-left HUD block; it is the
+     one HUD element that accepts input (and stays visible on phones). */
+  .diag-toggle {
+    pointer-events: auto;
+    background: rgba(10, 9, 8, 0.6);
+    border: 1px solid rgba(255, 106, 0, 0.35);
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    padding: 4px 8px;
+    margin-left: 14px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .diag-toggle:hover,
+  .diag-toggle:focus-visible,
+  html.diag .diag-toggle {
+    color: var(--kuka-yellow);
+    border-color: var(--kuka-yellow);
+    outline: none;
+  }
+
+  /* Diagnostics readout - right side under the status HUD */
+  .diag-panel {
+    position: fixed; z-index: 31;
+    top: 96px; right: 24px;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    padding: 10px 12px;
+    background: rgba(10, 9, 8, 0.82);
+    border: 1px solid rgba(255, 184, 0, 0.35);
+    color: var(--kuka-yellow);
+    font-size: 10px;
+    line-height: 1.7;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+  }
+  .diag-panel pre { font: inherit; margin: 0; white-space: pre; overflow-x: auto; }
   .hud-br { bottom: 24px; right: 24px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.3em; text-align: right; }
 
   .dot {
@@ -364,8 +403,21 @@
 
     /* Hide all corner telemetry - only the OPERATOR tag in the
        header remains (it lives inside flow, never overlaps) */
-    .hud-tl, .hud-tr, .hud-bl, .hud-br {
+    .hud-tl, .hud-tr, .hud-br {
       display: none;
+    }
+    /* ...except the diagnostics toggle: keep the block, drop the
+       version string, enlarge the tap target */
+    .hud-bl { bottom: 16px; left: 16px; }
+    .hud-bl .ver { display: none; }
+    .diag-toggle { margin-left: 0; padding: 7px 10px; font-size: 10px; }
+
+    /* Readout becomes a bottom sheet above the toggle */
+    .diag-panel {
+      top: auto; right: 12px; bottom: 52px; left: 12px;
+      width: auto;
+      font-size: 9px;
+      line-height: 1.6;
     }
 
     /* Panel tightened for small viewports */
@@ -424,7 +476,12 @@
   <div><span class="label">STAMPS:</span> <span id="stampCount" class="val">000</span></div>
 </div>
 
-<div class="hud hud-bl" aria-hidden="true">// LINK_STATION_v2.6 // EST.2026</div>
+<div class="hud hud-bl">
+  <span class="ver" aria-hidden="true">// LINK_STATION_v2.6 // EST.2026</span>
+  <button class="diag-toggle" id="diagBtn" type="button" aria-pressed="false" title="Diagnostics overlay (D)">[ DIAG: OFF ]</button>
+</div>
+
+<div class="diag-panel" id="diagPanel" hidden aria-hidden="true"><pre id="diagText"></pre></div>
 <div class="hud hud-br" aria-hidden="true">SHEKERFND // ASABEES</div>
 
 <div class="container">
@@ -594,6 +651,9 @@ window.addEventListener('orientationchange', handleResize);
    between a warm pocket and an idle tab.
    ------------------------------------------------------------ */
 const SETTLE_MS = 1200;      // keep drawing this long after the last input
+// On touch devices a tapped node stays "hovered" until the next tap, so
+// only mouse/trackpad devices keep the loop alive for the lock ring.
+const hoverCapable = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 let lastInput = performance.now();
 let loopActive = false;
 let armSettled = false;      // set by solveIK each frame
@@ -609,11 +669,16 @@ function noteInput() {
 }
 
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; noteInput(); });
-window.addEventListener('mousedown', e => { noteInput(); triggerStamp(e.clientX, e.clientY); });
+window.addEventListener('mousedown', e => {
+  if (e.target.closest('button')) return;   // HUD controls don't stamp
+  noteInput();
+  triggerStamp(e.clientX, e.clientY);
+});
 window.addEventListener('touchmove', e => {
   if (e.touches[0]) { mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; noteInput(); }
 }, { passive: true });
 window.addEventListener('touchstart', e => {
+  if (e.target.closest('button')) return;
   if (e.touches[0]) {
     mouse.x = e.touches[0].clientX;
     mouse.y = e.touches[0].clientY;
@@ -723,6 +788,135 @@ function currentTarget() {
   if (reduceMotion.matches) return getParkTarget();
   if (lock.el && !lock.offline) return portPoint(lock.el);
   return { x: mouse.x, y: mouse.y };
+}
+
+/* ============================================================
+   DIAGNOSTICS OVERLAY
+   ------------------------------------------------------------
+   Toggle with D, the [ DIAG ] button, or ?diag in the URL. Shows
+   what the solver sees: the workspace annulus, the link skeleton
+   with joint angles (A1..A4, up = positive) and link lengths, the
+   EE -> target vector with its error, plus a text readout of the
+   solver, loop and stamp state. Purely additive; the arm is drawn
+   at 35% so the skeleton reads on top of it.
+   ============================================================ */
+const diagPanelEl = document.getElementById('diagPanel');
+const diagTextEl = document.getElementById('diagText');
+const diagBtnEl = document.getElementById('diagBtn');
+let diag = false;
+let lastFrameAt = 0;
+let frameMs = 0;
+
+function setDiag(on) {
+  diag = on;
+  document.documentElement.classList.toggle('diag', on);
+  diagPanelEl.hidden = !on;
+  diagBtnEl.textContent = `[ DIAG: ${on ? 'ON' : 'OFF'} ]`;
+  diagBtnEl.setAttribute('aria-pressed', String(on));
+  noteInput();
+}
+diagBtnEl.addEventListener('click', () => setDiag(!diag));
+window.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'd' || e.key === 'D') setDiag(!diag);
+});
+if (new URLSearchParams(location.search).has('diag')) setDiag(true);
+
+const RAD2DEG = 180 / Math.PI;
+const wrapPI = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+// Joint angle as a controller would report it: relative to the previous
+// link, positive counter-clockwise on screen (i.e. "up" is positive).
+function jointDeg(i) {
+  const rel = i === 0 ? angles[0] : angles[i] - angles[i - 1];
+  return -wrapPI(rel) * RAD2DEG;
+}
+const fmtDeg = d => ((d < 0 ? '-' : '+') + Math.abs(d).toFixed(1)).padStart(6, ' ') + '\u00b0';
+const pad3 = n => String(Math.round(n)).padStart(3, '0');
+const pad4 = n => String(Math.round(n)).padStart(4, ' ');
+
+function drawDiagnostics(pts, target, now) {
+  const base = pts[0];
+  const ee = pts[pts.length - 1];
+  const reach = checkReach(target.x, target.y);
+  const err = Math.hypot(target.x - ee.x, target.y - ee.y);
+
+  ctx.save();
+  ctx.font = '8px JetBrains Mono, monospace';
+  ctx.lineWidth = 1;
+
+  // Workspace: everything between the two circles is reachable
+  ctx.strokeStyle = 'rgba(255, 184, 0, 0.35)';
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath();
+  ctx.arc(base.x, base.y, reach.maxReach, 0, Math.PI * 2);
+  ctx.stroke();
+  if (reach.minReach > 0) {
+    ctx.beginPath();
+    ctx.arc(base.x, base.y, reach.minReach, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255, 184, 0, 0.7)';
+  ctx.textAlign = 'left';
+  ctx.fillText(`R_MAX ${Math.round(reach.maxReach)}`, base.x + 6, base.y - reach.maxReach + 12);
+
+  // Base frame
+  ctx.strokeStyle = '#ff6a00';
+  ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(base.x + 36, base.y); ctx.stroke();
+  ctx.fillStyle = '#ff6a00';
+  ctx.fillText('X', base.x + 40, base.y + 3);
+  ctx.strokeStyle = '#ffb800';
+  ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(base.x, base.y - 36); ctx.stroke();
+  ctx.fillStyle = '#ffb800';
+  ctx.fillText('Y', base.x - 3, base.y - 42);
+
+  // Skeleton
+  ctx.strokeStyle = '#ffb800';
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+
+  // Joints: ring, A{i} angle; link length at each midpoint
+  for (let i = 0; i < angles.length; i++) {
+    const j = pts[i], k = pts[i + 1];
+    ctx.strokeStyle = '#ffb800';
+    ctx.beginPath(); ctx.arc(j.x, j.y, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#ffb800';
+    ctx.fillText(`A${i + 1} ${fmtDeg(jointDeg(i)).trim()}`, j.x + 10, j.y - 10);
+    ctx.fillStyle = 'rgba(232, 227, 220, 0.6)';
+    ctx.fillText(`L${i + 1} ${Math.round(armLengths[i])}`, (j.x + k.x) / 2 + 8, (j.y + k.y) / 2 + 12);
+  }
+
+  // EE -> target vector
+  const vecColor = reach.reachable ? 'rgba(0, 255, 102, 0.8)' : 'rgba(255, 58, 0, 0.8)';
+  ctx.strokeStyle = vecColor;
+  ctx.fillStyle = vecColor;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(ee.x, ee.y); ctx.lineTo(target.x, target.y); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.arc(target.x, target.y, 6, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(ee.x, ee.y, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillText(`ERR ${err.toFixed(1)}px`, (ee.x + target.x) / 2 + 8, (ee.y + target.y) / 2 - 4);
+  ctx.restore();
+
+  // Readout
+  const loopMs = frameMs > 0 && frameMs < 250 ? frameMs.toFixed(1).padStart(5, ' ') + ' ms' : '   -- ms';
+  const tgtLabel = reduceMotion.matches ? 'PARK'
+                 : lock.el ? `${lock.name} // ${lock.offline ? 'OFFLINE' : 'LOCKED'}` : 'FREE';
+  const lines = [
+    'DIAGNOSTICS              [D] TOGGLE',
+    `SOLVER   CCD  8 iter  damp 0.25  ${armSettled ? 'SETTLED' : 'MOVING'}`,
+    `LOOP     ${loopActive ? 'ONLINE ' : 'STANDBY'} ${loopMs}`,
+    `TARGET   ${pad4(target.x)}, ${pad4(target.y)}  ${tgtLabel}`,
+    `EE       ${pad4(ee.x)}, ${pad4(ee.y)}  ERR ${err.toFixed(1)} px`,
+    `REACH    ${Math.round(reach.minReach)} .. ${Math.round(reach.maxReach)} px  ${reach.reachable ? 'IN RANGE' : 'OUT OF RANGE'}`,
+  ];
+  for (let i = 0; i < angles.length; i++) {
+    lines.push(`A${i + 1}  ${fmtDeg(jointDeg(i))}   L${i + 1} ${String(Math.round(armLengths[i])).padStart(4, ' ')}`);
+  }
+  lines.push(`STAMPS   ${pad3(stamps.length)} active / ${pad3(stampCounter)} total`);
+  lines.push(`HEAD     ${PHASE_NAMES[stampHead.phase]}  piston ${(stampHead.pistonExtension * 100).toFixed(0).padStart(3, ' ')}%`);
+  diagTextEl.textContent = lines.join('\n');
 }
 
 /* ============================================================
@@ -1390,6 +1584,8 @@ const PHASE_NAMES = {
 
 function render(now) {
   if (!now) now = performance.now();
+  frameMs = lastFrameAt ? now - lastFrameAt : 0;
+  lastFrameAt = now;
 
   updateStampHead(now);
   // Arm always tracks the pointer (mouse on desktop, last touch
@@ -1413,8 +1609,9 @@ function render(now) {
     }
   }
 
-  // Layer 3: arm
+  // Layer 3: arm (ghosted under the diagnostics overlay)
   const pts = forwardKinematics();
+  if (diag) ctx.globalAlpha = 0.35;
   drawBase();
 
   const thicknesses = [34, 26, 20, 14];
@@ -1432,6 +1629,10 @@ function render(now) {
   const wrist = pts[pts.length - 2];
   const eeAngle = Math.atan2(ee.y - wrist.y, ee.x - wrist.x);
   drawStampHead(ee.x, ee.y, eeAngle, stampHead.pistonExtension);
+  ctx.globalAlpha = 1;
+
+  // Layer 4b: diagnostics overlay
+  if (diag) drawDiagnostics(pts, target, now);
 
   // Layer 5a: port marker while locked - a slowly rotating dashed ring
   // on the node's port so the dock point is visible even before the
@@ -1529,6 +1730,7 @@ function render(now) {
     stampHead.pistonExtension > 0.01 ||
     stampHead.pressureRing > 0.05 ||
     !armSettled ||
+    (hoverCapable && lock.el && !lock.offline) ||   // port ring keeps rotating
     (now - lastInput) < SETTLE_MS;
 
   if (busy) {
@@ -1539,8 +1741,10 @@ function render(now) {
     requestAnimationFrame(render);
   } else {
     loopActive = false;
+    lastFrameAt = 0;   // next wake starts a fresh frame-time measurement
     sysStateEl.textContent = 'STANDBY';
     sysDotEl.classList.add('standby');
+    if (diag) diagTextEl.textContent = diagTextEl.textContent.replace('LOOP     ONLINE ', 'LOOP     STANDBY');
   }
 }
 
